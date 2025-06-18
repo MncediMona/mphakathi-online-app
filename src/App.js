@@ -1,1770 +1,731 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { initializeApp } from 'firebase/app';
-import {
-    getAuth,
-    createUserWithEmailAndPassword,
-    signInWithEmailAndPassword,
-    signOut,
-    onAuthStateChanged,
-    signInAnonymously,
-    signInWithCustomToken
-} from 'firebase/auth';
-import {
-    getFirestore,
-    doc,
-    getDoc,
-    setDoc,
-    collection,
-    query,
-    where,
-    getDocs,
-    updateDoc,
-    addDoc,
-    serverTimestamp,
-    onSnapshot
-} from 'firebase/firestore';
-import Chart from 'chart.js/auto'; // For the benefit chart
+import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
 
-/* global __app_id, __firebase_config, __initial_auth_token */
-
-// Firebase Initialization
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// Services Data (Hardcoded for LLM Suggester and public display)
-const servicesListForLLM = `
-    Security Services: Community Guarding & Response (R100-R250 / callout), Affordable Alarm Systems (R150-R300 callout), Community CCTV Setup (From R200+ / setup), Safe Escort Services (From R50 / hour), Offline Crime Reporting App (Included with Membership).
-    Asset Management: Informal Dispute Resolution (Free for Members / R100 non-members), Basic Property Advisory (R50 / month for Members), Simplified Lease Agreements (R50 once-off), Legal Support Navigation (R200-R1000 / consultation).
-    Screening Services: Community-Based Tenant Vetting (R100 once-off), Domestic Worker/Gardener Vetting (R80 once-off), Affordable Property Listing (R500 once-off for tenant finding).
-    Community Convenience & Support: Clinic/Hospital Drop-off (R50-R100 / trip), Grocery Collection (R30-R50 / trip), Local Delivery Service (R30-R50 / delivery), Medication Collection (R30-R50 / collection), Queuing Service (R40-R60 / hour).
-`;
-
-const serviceCategories = [
-    { id: 'security', name: 'Security', icon: '🛡️', description: 'Solutions to keep your home and family safe.' },
-    { id: 'asset', name: 'Asset Management', icon: '🏡', description: 'Support for property, legal, and financial matters.' },
-    { id: 'screening', name: 'Screening', icon: '🤝', description: 'Vetting services for tenants, domestic workers, and more.' },
-    { id: 'convenience', name: 'Convenience', icon: '📦', description: 'Daily errands and support to ease your life.' }
-];
-
-// Inline SVG Icons (replacing lucide-react)
-const HomeIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <path d="M5 12H2l10-10 10 10h-3"></path>
-        <path d="M19 22v-4a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v4"></path>
-        <path d="M12 22v-4"></path>
-    </svg>
-);
-
-const UserIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <circle cx="12" cy="7" r="4"></circle>
-        <path d="M12 14v6"></path>
-        <path d="M7 19h10"></path>
-    </svg>
-);
-
-const DollarSignIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <line x1="12" y1="1" x2="12" y2="23"></line>
-        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-    </svg>
-);
-
-const BriefcaseIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
-        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
-    </svg>
-);
-
-const PlusCircleIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <circle cx="12" cy="12" r="10"></circle>
-        <line x1="12" y1="8" x2="12" y2="16"></line>
-        <line x1="8" y1="12" x2="16" y2="12"></line>
-    </svg>
-);
-
-const SearchIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <circle cx="11" cy="11" r="8"></circle>
-        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-    </svg>
-);
-
-const CalendarIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-        <line x1="16" y1="2" x2="16" y2="6"></line>
-        <line x1="8" y1="2" x2="8" y2="6"></line>
-        <line x1="3" y1="10" x2="21" y2="10"></line>
-    </svg>
-);
-
-const AwardIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <circle cx="12" cy="8" r="7"></circle>
-        <path d="M8.21 13.89l-1.63 4.54 4.54-1.63L12 21l-1.63-4.54L5.83 13.89z"></path>
-    </svg>
-);
-
-const MessageCircleIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-2.2c-.3-.4-.5-.9-.6-1.4A8.5 8.5 0 0 1 12 3a8.38 8.38 0 0 1 7.6 4.7c.4.9.6 1.9.7 2.9z"></path>
-    </svg>
-);
-
-const LogOutIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-        <polyline points="17 16 22 11 17 6"></polyline>
-        <line x1="22" y1="11" x2="10" y2="11"></line>
-    </svg>
-);
-
-const CheckCircleIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <path d="M22 11.08V12a10 10 0 1 1-5.93-8.81"></path>
-        <polyline points="22 4 12 14.01 9 11.01"></polyline>
-    </svg>
-);
-
-const XCircleIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <circle cx="12" cy="12" r="10"></circle>
-        <line x1="15" y1="9" x2="9" y2="15"></line>
-        <line x1="9" y1="9" x2="15" y2="15"></line>
-    </svg>
-);
-
-const MailIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <rect x="2" y="4" width="20" height="16" rx="2"></rect>
-        <path d="M22 6L12 13L2 6"></path>
-    </svg>
-);
-
-const PhoneIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2H7.08a2 2 0 0 1 2 1.74 15.74 15.74 0 0 0 .96 4.37 2 2 0 0 1-.27 2.1l-1.93 1.93a15 15 0 0 0 6 6l1.93-1.93a2 2 0 0 1 2.1-.27 15.74 15.74 0 0 0 4.35.96A2 2 0 0 1 22 16.92z"></path>
-    </svg>
-);
-
-const MapPinIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <path d="M12 21.7C17.3 17 22 13 22 9A7 7 0 0 0 12 2a7 7 0 0 0-10 7c0 4 4.7 8 9.7 12.7z"></path>
-        <circle cx="12" cy="9" r="3"></circle>
-    </svg>
-);
-
-const InfoIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <circle cx="12" cy="12" r="10"></circle>
-        <line x1="12" y1="16" x2="12" y2="12"></line>
-        <line x1="12" y1="8" x2="12.01" y2="8"></line>
-    </svg>
-);
-
-const WalletIcon = ({ size = 24, className = '', strokeWidth = 2 }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h12a2 2 0 0 1 0 4H5a2 2 0 0 0 0 4h12a2 2 0 0 0 2-2v-3"></path>
-        <path d="M19 17v-2"></path>
-    </svg>
-);
+// Lucide React icons (re-defined for completeness)
+const HomeIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
+const UserIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
+const BriefcaseIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><path d="M12 12h0"/></svg>;
+const CalendarIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg>;
+const SettingsIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.78 1.25a2 2 0 0 0 .73 2.73l.04.04a2 2 0 0 1 0 2.83l-.04.04a2 2 0 0 0-.73 2.73l.78 1.25a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.78-1.25a2 2 0 0 0-.73-2.73l-.04-.04a2 2 0 0 1 0-2.83l.04-.04a2 2 0 0 0 .73-2.73l-.78-1.25a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>;
+const LogOutIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>;
+const PlusCircleIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>;
+const EditIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>;
+const CheckCircleIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
+const XCircleIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>;
+const FileTextIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>;
+const PackageIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m7.5 4.27 9 5.15"/><path d="m21 8.62-9-5.15-9 5.15 9 5.15Z"/><path d="M3.5 12.28V19l8.5 4 8.5-4v-6.72"/><path d="M12 22.99V12.28"/></svg>;
+const ShieldCheckIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>;
+const DollarSignIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>;
+const KeyIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 2l-2 2m-7.61 7.61a3 3 0 1 1-4.24-4.24L1.9 14.14a5 5 0 1 0 7.07 7.07L19 12z"/></svg>;
+const CheckCircle2Icon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>;
+const PaintbrushIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18.37 2.63c-1.3-1.3-3.9-1.3-5.2 0l-7.2 7.2c-1.3 1.3-1.3 3.9 0 5.2l2.4 2.4c1.3 1.3 3.9 1.3 5.2 0l7.2-7.2c1.3-1.3 1.3-3.9 0-5.2zm-2.4 2.4l-.8.8m-2.4 2.4l-.8.8m-2.4 2.4l-.8.8m-2.4 2.4l-.8.8"/><path d="M12 22h10"/></svg>;
 
 
-// Reusable Modal Component
-const Modal = ({ show, title, message, onClose, onConfirm, showConfirm = false, confirmText = "Confirm" }) => {
-    if (!show) return null;
+// --- Custom Confirmation Modal ---
+const ConfirmationModal = ({ message, onConfirm, onCancel, confirmText = "Confirm", cancelText = "Cancel" }) => {
     return (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl max-w-sm w-full">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">{title}</h3>
-                <p className="text-gray-600 mb-6">{message}</p>
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-sm">
+                <p className="text-lg text-gray-800 mb-6">{message}</p>
                 <div className="flex justify-end space-x-4">
-                    <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition">Close</button>
-                    {showConfirm && (
-                        <button onClick={onConfirm} className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition">{confirmText}</button>
-                    )}
+                    <button
+                        onClick={onCancel}
+                        className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                    >
+                        {cancelText}
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors duration-200"
+                    >
+                        {confirmText}
+                    </button>
                 </div>
             </div>
         </div>
     );
 };
 
-// Reusable Loading Spinner
-const LoadingSpinner = ({ message = "Loading..." }) => (
-    <div className="flex flex-col items-center justify-center py-8">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600 mb-4"></div>
-        <p className="text-gray-600">{message}</p>
-    </div>
-);
+// --- Application Context ---
+const AppContext = createContext(null);
 
-// --- Public Pages ---
-
-const HomePage = ({ onNavigate, userId, userProfile, currentAuthUser }) => {
-    // LLM Service Suggester Refs
-    const userNeedInputRef = useRef(null);
-    const suggestionLoadingRef = useRef(null);
-    const serviceSuggestionOutputRef = useRef(null);
-    const chartInstance = useRef(null); // For the cost-benefit chart
-
-    const [activeCategoryTab, setActiveCategoryTab] = useState('security');
-    const [recentProblems, setRecentProblems] = useState([]);
-    const [problemsLoading, setProblemsLoading] = useState(true);
-
-    // Fetch recent problems for the homepage tabs
-    useEffect(() => {
-        const fetchRecentProblems = async () => {
-            setProblemsLoading(true);
-            try {
-                // Fetch up to 3 recent open problems for the active category
-                const q = query(
-                    collection(db, `artifacts/${appId}/serviceRequests`),
-                    where("category", "==", activeCategoryTab),
-                    where("status", "==", "pending"), // Only show open problems
-                    // orderBy("createdAt", "desc"), // Disabling orderBy due to potential index issues as per instructions
-                    // limit(3) // Limit the number of problems
-                );
-                const querySnapshot = await getDocs(q);
-                let problems = querySnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data(),
-                    createdAt: doc.data().createdAt?.toDate().toLocaleString()
-                }));
-                // Sort in memory and limit if orderBy is not used
-                problems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                setRecentProblems(problems.slice(0, 3));
-            } catch (error) {
-                console.error("Error fetching recent problems:", error);
-                setRecentProblems([]);
-            } finally {
-                setProblemsLoading(false);
-            }
+const App = () => {
+    // Mock user data (in-memory, resets on refresh)
+    const [userId, setUserId] = useState(crypto.randomUUID()); // Generate a new ID on each load
+    const [userProfile, setUserProfile] = useState(() => {
+        // Default to 'member' for initial load, can be toggled via mock login/role switch
+        const initialRole = 'loggedOut'; // Start as logged out
+        return {
+            uid: '', // Set empty for loggedOut
+            name: 'Guest User',
+            email: '',
+            phone: '',
+            role: initialRole,
+            isProviderApproved: false,
+            isPaidMember: false,
+            bio: '',
+            address: '',
+            companyName: undefined,
+            specialties: undefined,
         };
-
-        fetchRecentProblems();
-    }, [activeCategoryTab]); // Re-fetch when category tab changes
-
-    const handleGetSuggestion = async () => {
-        const userPrompt = userNeedInputRef.current.value.trim();
-        if (!userPrompt) {
-            serviceSuggestionOutputRef.current.innerHTML = '<p class="text-red-500">Please describe your need to get a suggestion.</p>';
-            return;
-        }
-
-        suggestionLoadingRef.current.classList.remove('hidden');
-        serviceSuggestionOutputRef.current.innerHTML = ''; // Clear previous output
-
-        const prompt = `
-            Based on the Mphakathi Online services and pricing provided below, and the user's described need, suggest which Mphakathi Online service(s) would be most suitable. Explain why, and provide the approximate price range if applicable. If no direct service applies, suggest the closest one or a general community support idea. Keep the response concise and helpful.
-
-            Mphakathi Online Services:
-            ${servicesListForLLM}
-
-            User's Need: "${userPrompt}"
-        `;
-
-        try {
-            let chatHistory = [];
-            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
-            const payload = { contents: chatHistory };
-            const apiKey = ""; // API Key set to empty string for secure Canvas runtime injection
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            const result = await response.json();
-            if (result.candidates && result.candidates.length > 0 &&
-                result.candidates[0].content && result.candidates[0].content.parts &&
-                result.candidates[0].content.parts.length > 0) {
-                const text = result.candidates[0].content.parts[0].text;
-                serviceSuggestionOutputRef.current.innerHTML = `<p>${text}</p>`;
-            } else {
-                serviceSuggestionOutputRef.current.innerHTML = '<p class="text-red-500">Could not get a suggestion. Please try again.</p>';
-            }
-        } catch (error) {
-            console.error('Error calling Gemini API:', error);
-            serviceSuggestionOutputRef.current.innerHTML = '<p class="text-red-500">An error occurred while getting suggestions. Please try again later.</p>';
-        } finally {
-            suggestionLoadingRef.current.classList.add('hidden');
-        }
-    };
-
-    // Chart.js Initialization
-    useEffect(() => {
-        const ctx = document.getElementById('costBenefitChart')?.getContext('2d');
-        if (ctx) {
-            if (chartInstance.current) {
-                chartInstance.current.destroy();
-            }
-
-            chartInstance.current = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: ['Your Monthly Cost vs. Potential Incident Cost'],
-                    datasets: [
-                        {
-                            label: 'MKYN Monthly Membership',
-                            data: [50],
-                            backgroundColor: 'rgba(217, 119, 6, 0.8)', // amber-600
-                            borderColor: 'rgba(217, 119, 6, 1)',
-                            borderWidth: 1
-                        },
-                        {
-                            label: 'Avg. Cost of One Burglary',
-                            data: [4500],
-                            backgroundColor: 'rgba(239, 68, 68, 0.8)', // red-500
-                            borderColor: 'rgba(239, 68, 68, 1)',
-                            borderWidth: 1
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                callback: function(value) {
-                                    return 'R ' + value;
-                                }
-                            }
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            callbacks: {
-                                title: function(tooltipItems) {
-                                    const item = tooltipItems[0];
-                                    let label = item.chart.data.labels[item.dataIndex];
-                                    if (Array.isArray(label)) {
-                                        return label.join(' ');
-                                    }
-                                    return label;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    }, []);
-
-    return (
-        <div className="bg-amber-50 min-h-screen">
-            <header className="bg-amber-800 text-white shadow-lg">
-                <nav className="container mx-auto px-6 py-4 flex justify-between items-center">
-                    <img src="https://i.ibb.co/WNnqYmPf/MO-Official-Logo.png" alt="MO-Official-Logo" className="w-24 h-24 md:w-32 md:h-32 object-contain" />
-                    <div className="space-x-4">
-                        <button onClick={() => onNavigate('pricing')} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Pricing</button>
-                        <button onClick={() => onNavigate('problemLists')} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Problem Listings</button>
-                        {!currentAuthUser ? (
-                            <>
-                                <button onClick={() => onNavigate('login')} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Login</button>
-                                <button onClick={() => onNavigate('signup')} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Sign Up</button>
-                            </>
-                        ) : (
-                            <>
-                                {userProfile?.role === 'member' && (
-                                    <button onClick={() => onNavigate('memberDashboard')} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Dashboard</button>
-                                )}
-                                {userProfile?.role === 'provider' && (
-                                    <button onClick={() => onNavigate('providerDashboard')} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Dashboard</button>
-                                )}
-                                <button onClick={() => auth.signOut()} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Logout</button>
-                            </>
-                        )}
-                    </div>
-                </nav>
-            </header>
-
-            <main>
-                <section className="bg-amber-700 text-white py-20">
-                    <div className="container mx-auto px-6 text-center">
-                        <h1 className="text-4xl md:text-5xl font-bold mb-4">Safer Homes, Stronger Communities.</h1>
-                        <p className="text-lg md:text-xl text-amber-200 max-w-3xl mx-auto">
-                            Mphakathi Online is here to empower our community in Soweto by connecting those with needs to reliable, local service providers.
-                        </p>
-                        {userId && (
-                            <p className="mt-4 text-sm text-amber-100">
-                                Your User ID: <span className="font-semibold">{userId}</span>
-                                {userProfile && userProfile.membershipStatus && userProfile.role && (
-                                    <span className="ml-4">Role: <span className="font-semibold capitalize">{userProfile.role}</span> | Membership: <span className="font-semibold">{userProfile.membershipStatus}</span></span>
-                                )}
-                            </p>
-                        )}
-                        <div className="mt-8 space-x-4">
-                            <button onClick={() => onNavigate('signup')} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300">Join as Member</button>
-                            <button onClick={() => onNavigate('becomeProvider')} className="bg-white hover:bg-gray-100 text-amber-800 font-bold py-3 px-6 rounded-lg transition duration-300">Become a Provider</button>
-                        </div>
-                    </div>
-                </section>
-
-                <section id="services" className="py-16 md:py-20 bg-white">
-                    <div className="container mx-auto px-6">
-                        <div className="text-center mb-12">
-                            <h2 className="text-3xl font-bold text-gray-800">Our Services, Designed For You</h2>
-                            <p className="text-gray-600 mt-2 max-w-2xl mx-auto">Mphakathi Online connects community members to verified, local service providers for these essential needs.</p>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-                            {serviceCategories.map(category => (
-                                <div key={category.id} className="bg-white p-6 rounded-lg shadow-md hover:shadow-xl transition-shadow duration-300">
-                                    <h3 className="text-xl font-bold text-amber-700 mb-2">{category.icon} {category.name}</h3>
-                                    <p className="text-gray-600">{category.description}</p>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </section>
-
-                {/* Problem Listings on Home Page */}
-                <section id="problem-listings" className="py-16 md:py-20 bg-amber-50">
-                    <div className="container mx-auto px-6">
-                        <div className="text-center mb-12">
-                            <h2 className="text-3xl font-bold text-gray-800">Community Needs: Recent Problems Posted</h2>
-                            <p className="text-gray-600 mt-2 max-w-2xl mx-auto">See how members are using Mphakathi Online to find solutions. Providers can click "View All" to help!</p>
-                        </div>
-                        <div className="flex justify-center mb-8 flex-wrap">
-                            {serviceCategories.map(category => (
-                                <button
-                                    key={category.id}
-                                    onClick={() => setActiveCategoryTab(category.id)}
-                                    className={`px-6 py-3 rounded-t-lg font-semibold text-lg transition-colors duration-300 ${activeCategoryTab === category.id ? 'bg-amber-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-                                >
-                                    {category.name}
-                                </button>
-                            ))}
-                        </div>
-
-                        {problemsLoading ? (
-                            <LoadingSpinner message={`Loading ${activeCategoryTab} problems...`} />
-                        ) : recentProblems.length === 0 ? (
-                            <p className="text-center text-gray-600 p-6 bg-white rounded-lg shadow-md">No recent {activeCategoryTab} problems posted yet. Be the first to create one!</p>
-                        ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                {recentProblems.map(problem => (
-                                    <div key={problem.id} className="bg-white p-6 rounded-lg shadow-md border-t-4 border-amber-600">
-                                        <h3 className="text-xl font-bold text-gray-800 mb-2">{problem.title}</h3>
-                                        <p className="text-gray-600 text-sm mb-3 line-clamp-3">{problem.description}</p>
-                                        <p className="text-xs text-gray-500">Category: <span className="font-semibold capitalize">{problem.category}</span></p>
-                                        <p className="text-xs text-gray-500">Location: <span className="font-semibold">{problem.location || 'N/A'}</span></p>
-                                        <p className="text-xs text-gray-500">Posted on: {problem.createdAt}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                        <div className="text-center mt-10">
-                            <button onClick={() => onNavigate('problemLists')} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300">View All Problem Listings</button>
-                        </div>
-                    </div>
-                </section>
-
-
-                {/* LLM-Powered Service Recommender Section */}
-                <section id="llm-recommender" className="py-16 md:py-20 bg-white">
-                    <div className="container mx-auto px-6">
-                        <div className="text-center mb-12">
-                            <h2 className="text-3xl font-bold text-gray-800">Unsure What You Need? Ask Our AI! ✨</h2>
-                            <p className="text-gray-600 mt-2 max-w-2xl mx-auto">
-                                Describe your situation or challenge, and our Mphakathi AI will suggest the best services for you from our provider network.
-                            </p>
-                        </div>
-                        <div className="bg-amber-50 p-8 rounded-xl shadow-md max-w-3xl mx-auto">
-                            <textarea
-                                ref={userNeedInputRef}
-                                className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-amber-500 focus:border-amber-500 mb-4"
-                                rows="4"
-                                placeholder="e.g., 'I need help getting my grandmother's medication from the clinic.', or 'My tenant isn't paying rent and I need advice.'"
-                            ></textarea>
-                            <button
-                                onClick={handleGetSuggestion}
-                                className="bg-[#1A3A5A] hover:bg-[#3E618A] text-white font-bold py-3 px-6 rounded-lg transition duration-300 w-full md:w-auto"
-                            >
-                                Get Service Suggestion ✨
-                            </button>
-                            <div ref={suggestionLoadingRef} className="mt-4 text-center text-gray-600 hidden">
-                                <LoadingSpinner message="Fetching suggestion..." />
-                            </div>
-                            <div ref={serviceSuggestionOutputRef} className="mt-6 p-4 bg-gray-100 rounded-lg border border-gray-200 text-gray-700">
-                                Suggestions will appear here.
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <section className="py-16 md:py-20 bg-white">
-                    <div className="container mx-auto px-6">
-                        <div className="text-center mb-12">
-                            <h2 className="text-3xl font-bold text-gray-800">Why Choose Mphakathi Online?</h2>
-                            <p className="text-gray-600 mt-2 max-w-2xl mx-auto">We are more than a service. We are your neighbours, committed to building a better, safer Soweto together by connecting you to the right help.</p>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 text-center">
-                            <div className="bg-amber-50 p-8 rounded-xl shadow-md">
-                                <div className="text-4xl mb-4">💰</div>
-                                <h3 className="text-xl font-bold text-gray-800 mb-2">Affordable for Soweto</h3>
-                                <p className="text-gray-600">Our prices are designed to fit your budget, connecting you to cost-effective local solutions.</p>
-                            </div>
-                            <div className="bg-amber-50 p-8 rounded-xl shadow-md">
-                                <div className="text-4xl mb-4">❤️</div>
-                                <h3 className="text-xl font-bold text-gray-800 mb-2">From Soweto, For Soweto</h3>
-                                <p className="text-gray-600">We understand our community's needs and empower local providers to serve their neighbours.</p>
-                            </div>
-                            <div className="bg-amber-50 p-8 rounded-xl shadow-md">
-                                <div className="text-4xl mb-4">👷</div>
-                                <h3 className="text-xl font-bold text-gray-800 mb-2">Local Employment</h3>
-                                <p className="text-gray-600">We create opportunities by connecting skilled individuals with community needs, fostering local growth.</p>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <section id="value" className="py-16 md:py-20 bg-white">
-                    <div className="container mx-auto px-6">
-                        <div className="text-center mb-12">
-                            <h2 className="text-3xl font-bold text-gray-800">An Investment in Your Peace of Mind</h2>
-                            <p className="text-gray-600 mt-2 max-w-2xl mx-auto">See how our low monthly fee compares to the high potential cost of a single security incident. Proactive safety is always more affordable.</p>
-                        </div>
-                        <div className="chart-container w-full max-w-2xl mx-auto h-80 md:h-96 max-h-[400px] relative">
-                            <canvas id="costBenefitChart"></canvas>
-                        </div>
-                    </div>
-                </section>
-
-                <section id="join" className="bg-amber-800 text-white py-20">
-                    <div className="container mx-auto px-6 text-center">
-                        <h2 className="text-3xl font-bold mb-4">Join Our Mphakathi Today!</h2>
-                        <p className="text-lg text-amber-200 mb-6 max-w-3xl mx-auto">Become a Community Member and unlock a safer, stronger community for your family and neighbours, powered by our network of local providers.</p>
-                        <div className="bg-white text-gray-800 rounded-lg p-8 inline-block shadow-lg">
-                            <p className="text-xl font-bold">Membership</p>
-                            <p className="text-4xl font-bold my-2">R50 <span className="text-lg font-normal">/ month</span></p>
-                            <p className="text-gray-600">+ R150 once-off joining fee</p>
-                        </div>
-
-                        <div className="mt-10">
-                            <h3 className="text-2xl font-bold mb-4">Ready to Get Started?</h3>
-                            <p className="text-amber-200 mb-2">Contact us today!</p>
-                            <div className="flex flex-col md:flex-row justify-center items-center space-y-4 md:space-y-0 md:space-x-6 text-lg">
-                                <span><MailIcon className="inline-block mr-2" size={20} /> Email: info@mphakathi.co.za</span>
-                                <span><PhoneIcon className="inline-block mr-2" size={20} /> Call: 0782262177</span>
-                                <span><MessageCircleIcon className="inline-block mr-2" size={20} /> WhatsApp: 0685326165</span>
-                                <span><MapPinIcon className="inline-block mr-2" size={20} /> Visit: Orange Street, Protea Glenn, Soweto</span>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-            </main>
-
-            <footer className="bg-gray-800 text-white py-6">
-                <div className="container mx-auto px-6 text-center">
-                    <p>&copy; 2025 Back Effort Works T/A Mphakathi Online. All Rights Reserved.</p>
-                </div>
-            </footer>
-        </div>
-    );
-};
-
-const LoginPage = ({ onNavigate, setCurrentUser, setUserProfile, setShowModal, setModalContent }) => {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
+    });
+    const [userRole, setUserRole] = useState(userProfile.role);
+    const [isPaidMember, setIsPaidMember] = useState(userProfile.isPaidMember);
+    const [currentPage, setCurrentPage] = useState('dashboard');
     const [loading, setLoading] = useState(false);
+    const [showPostProblemModal, setShowPostProblemModal] = useState(false);
+    const [showRegisterModal, setShowRegisterModal] = useState(false); // For general registration
+    const [selectedPlan, setSelectedPlan] = useState(null); // For membership plan selection
+    const [message, setMessage] = useState({ type: '', text: '' }); // Global app messages
 
-    const handleLogin = async (e) => {
-        e.preventDefault();
-        setLoading(true);
-        try {
-            const userCredential = await signInWithEmailAndPassword(auth, email, password);
-            const user = userCredential.user;
-            setCurrentUser(user);
+    // Global App Branding State
+    const [appName, setAppName] = useState('Mphakathi Online');
+    const [appLogo, setAppLogo] = useState('https://placehold.co/100x40/964b00/ffffff?text=Logo'); // Default placeholder logo
 
-            const userDocRef = doc(db, `artifacts/${appId}/users/${user.uid}/profile/doc`);
-            const userDocSnap = await getDoc(userDocRef);
 
-            if (userDocSnap.exists()) {
-                setUserProfile(userDocSnap.data());
-                setShowModal(true);
-                setModalContent({ title: "Success", message: `Welcome back, ${userDocSnap.data().name || user.email}!` });
-                if (userDocSnap.data().role === 'member') {
-                    onNavigate('memberDashboard');
-                } else if (userDocSnap.data().role === 'provider') {
-                    onNavigate('providerDashboard');
-                } else {
-                    onNavigate('home'); // Fallback
-                }
-            } else {
-                // Should not happen if signup created the profile correctly
-                setShowModal(true);
-                setModalContent({ title: "Error", message: "User profile not found. Please contact support." });
-                await signOut(auth); // Force logout
-                onNavigate('login');
-            }
-        } catch (error) {
-            console.error("Login error:", error);
-            setShowModal(true);
-            let errorMessage = "Login failed. Please check your credentials.";
-            if (error.code === 'auth/invalid-email' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-                errorMessage = "Invalid email or password.";
-            } else if (error.code === 'auth/too-many-requests') {
-                errorMessage = "Too many failed login attempts. Please try again later.";
-            }
-            setModalContent({ title: "Login Error", message: errorMessage });
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="min-h-screen bg-amber-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full space-y-8 bg-white p-10 rounded-xl shadow-lg">
-                <div>
-                    <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">Sign in to your account</h2>
-                </div>
-                <form className="mt-8 space-y-6" onSubmit={handleLogin}>
-                    <div className="rounded-md shadow-sm -space-y-px">
-                        <div>
-                            <label htmlFor="email-address" className="sr-only">Email address</label>
-                            <input
-                                id="email-address"
-                                name="email"
-                                type="email"
-                                autoComplete="email"
-                                required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 focus:z-10 sm:text-sm"
-                                placeholder="Email address"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                            />
-                        </div>
-                        <div>
-                            <label htmlFor="password" className="sr-only">Password</label>
-                            <input
-                                id="password"
-                                name="password"
-                                type="password"
-                                autoComplete="current-password"
-                                required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 focus:z-10 sm:text-sm"
-                                placeholder="Password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
-                        </div>
-                    </div>
-
-                    <div>
-                        <button
-                            type="submit"
-                            className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 transition-colors"
-                            disabled={loading}
-                        >
-                            {loading ? <LoadingSpinner message="Signing in..." /> : 'Sign in'}
-                        </button>
-                    </div>
-                </form>
-                <div className="text-center text-sm">
-                    <p className="text-gray-600">Don't have an account? <button onClick={() => onNavigate('signup')} className="font-medium text-amber-600 hover:text-amber-500">Sign up</button></p>
-                    <p className="mt-2 text-gray-600">Back to <button onClick={() => onNavigate('home')} className="font-medium text-amber-600 hover:text-amber-500">Home</button></p>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const SignupPage = ({ onNavigate, setShowModal, setModalContent }) => {
-    const [name, setName] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [loading, setLoading] = useState(false);
-
-    const handleSignup = async (e) => {
-        e.preventDefault();
-        setLoading(true);
-        try {
-            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-            const user = userCredential.user;
-
-            // Default role is 'member' for signup
-            const userProfileData = {
-                uid: user.uid,
-                role: 'member',
-                name: name,
-                email: email,
-                isProviderApproved: false, // Only applicable if they later become a provider
-                isProviderPaid: false, // Only applicable if they later become a provider
-                membershipStatus: 'Free', // Default for new members
-                createdAt: serverTimestamp(),
-                lastLogin: serverTimestamp(),
-            };
-
-            await setDoc(doc(db, `artifacts/${appId}/users/${user.uid}/profile/doc`), userProfileData);
-
-            setShowModal(true);
-            setModalContent({
-                title: "Success",
-                message: "Account created successfully! You are now logged in as a Member."
-            });
-            onNavigate('memberDashboard');
-        } catch (error) {
-            console.error("Signup error:", error);
-            setShowModal(true);
-            let errorMessage = "Signup failed. Please try again.";
-            if (error.code === 'auth/email-already-in-use') {
-                errorMessage = "This email address is already in use.";
-            } else if (error.code === 'auth/weak-password') {
-                errorMessage = "Password is too weak. Please choose a stronger password.";
-            } else if (error.code === 'auth/invalid-email') {
-                errorMessage = "Invalid email address.";
-            }
-            setModalContent({ title: "Signup Error", message: errorMessage });
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="min-h-screen bg-amber-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full space-y-8 bg-white p-10 rounded-xl shadow-lg">
-                <div>
-                    <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">Create a New Account</h2>
-                    <p className="mt-2 text-center text-sm text-gray-600">Join as a Member for free</p>
-                </div>
-                <form className="mt-8 space-y-6" onSubmit={handleSignup}>
-                    <div className="rounded-md shadow-sm -space-y-px">
-                        <div>
-                            <label htmlFor="name" className="sr-only">Full Name</label>
-                            <input
-                                id="name"
-                                name="name"
-                                type="text"
-                                autoComplete="name"
-                                required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 focus:z-10 sm:text-sm"
-                                placeholder="Full Name"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                            />
-                        </div>
-                        <div>
-                            <label htmlFor="email-address" className="sr-only">Email address</label>
-                            <input
-                                id="email-address"
-                                name="email"
-                                type="email"
-                                autoComplete="email"
-                                required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-amber-500 focus:border-amber-500 focus:z-10 sm:text-sm"
-                                placeholder="Email address"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                            />
-                        </div>
-                        <div>
-                            <label htmlFor="password" className="sr-only">Password</label>
-                            <input
-                                id="password"
-                                name="password"
-                                type="password"
-                                autoComplete="new-password"
-                                required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 focus:z-10 sm:text-sm"
-                                placeholder="Password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
-                        </div>
-                    </div>
-
-                    <div>
-                        <button
-                            type="submit"
-                            className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 transition-colors"
-                            disabled={loading}
-                        >
-                            {loading ? <LoadingSpinner message="Creating account..." /> : 'Sign Up'}
-                        </button>
-                    </div>
-                </form>
-                <div className="text-center text-sm">
-                    <p className="text-gray-600">Already have an account? <button onClick={() => onNavigate('login')} className="font-medium text-amber-600 hover:text-amber-500">Sign in</button></p>
-                    <p className="mt-2 text-gray-600">Back to <button onClick={() => onNavigate('home')} className="font-medium text-amber-600 hover:text-amber-500">Home</button></p>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const BecomeProviderPage = ({ onNavigate, userId, setShowModal, setModalContent, userProfile }) => {
-    const [providerName, setProviderName] = useState('');
-    const [providerContact, setProviderContact] = useState('');
-    const [providerService, setProviderService] = useState('');
-    const [loading, setLoading] = useState(false);
-
-    const handleSubmitApplication = async (e) => {
-        e.preventDefault();
-        if (!userId) {
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "You must be logged in to apply as a provider." });
-            return;
-        }
-        setLoading(true);
-        try {
-            // Add application to a 'providerApplications' collection
-            await addDoc(collection(db, `artifacts/${appId}/providerApplications`), {
-                userId: userId,
-                name: providerName,
-                contact: providerContact,
-                service: providerService,
-                status: 'pending', // pending, approved, rejected
-                applicationDate: serverTimestamp(),
-            });
-
-            // Update user's role to 'pending_provider'
-            const userDocRef = doc(db, `artifacts/${appId}/users/${userId}/profile/doc`);
-            await updateDoc(userDocRef, {
-                role: 'pending_provider',
-                applicationSubmitted: true
-            });
-
-            setShowModal(true);
-            setModalContent({ title: "Application Submitted", message: "Thank you for your interest! Your provider application has been submitted and is awaiting review. We will contact you soon." });
-            onNavigate('home');
-        } catch (error) {
-            console.error("Error submitting provider application:", error);
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "Failed to submit application. Please try again." });
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="min-h-screen bg-amber-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full space-y-8 bg-white p-10 rounded-xl shadow-lg">
-                <div>
-                    <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">Become a Mphakathi Provider</h2>
-                    <p className="mt-2 text-center text-sm text-gray-600">Join our network and offer services to the community.</p>
-                </div>
-                {!userId ? (
-                    <div className="text-center">
-                        <p className="text-red-500 mb-4">Please log in or sign up to apply as a provider.</p>
-                        <button onClick={() => onNavigate('login')} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 mr-2">Login</button>
-                        <button onClick={() => onNavigate('signup')} className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-300">Sign Up</button>
-                    </div>
-                ) : userProfile?.role === 'pending_provider' ? (
-                    <div className="text-center p-6 bg-blue-100 border border-blue-200 text-blue-800 rounded-lg">
-                        <InfoIcon className="inline-block mr-2" size={20} />
-                        <p className="font-semibold">Your provider application is currently pending review.</p>
-                        <p className="text-sm mt-2">We will notify you once it has been processed.</p>
-                        <button onClick={() => onNavigate('home')} className="mt-4 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Back to Home</button>
-                    </div>
-                ) : userProfile?.role === 'provider' ? (
-                    <div className="text-center p-6 bg-green-100 border border-green-200 text-green-800 rounded-lg">
-                        <CheckCircleIcon className="inline-block mr-2" size={20} />
-                        <p className="font-semibold">You are already an approved Mphakathi Provider!</p>
-                        <p className="text-sm mt-2">Proceed to your dashboard to manage your services.</p>
-                        <button onClick={() => onNavigate('providerDashboard')} className="mt-4 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Go to Dashboard</button>
-                    </div>
-                ) : (
-                    <form className="mt-8 space-y-6" onSubmit={handleSubmitApplication}>
-                        <div className="rounded-md shadow-sm -space-y-px">
-                            <div>
-                                <label htmlFor="provider-name" className="sr-only">Your Name / Business Name</label>
-                                <input
-                                    id="provider-name"
-                                    name="provider-name"
-                                    type="text"
-                                    autoComplete="name"
-                                    required
-                                    className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 focus:z-10 sm:text-sm"
-                                    placeholder="Your Name or Business Name"
-                                    value={providerName}
-                                    onChange={(e) => setProviderName(e.target.value)}
-                                />
-                            </div>
-                            <div>
-                                <label htmlFor="provider-contact" className="sr-only">Contact Number or Email</label>
-                                <input
-                                    id="provider-contact"
-                                    name="provider-contact"
-                                    type="text"
-                                    autoComplete="tel"
-                                    required
-                                    className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-amber-500 focus:border-amber-500 focus:z-10 sm:text-sm"
-                                    placeholder="Contact Number or Email"
-                                    value={providerContact}
-                                    onChange={(e) => setProviderContact(e.target.value)}
-                                />
-                            </div>
-                            <div>
-                                <label htmlFor="provider-service" className="sr-only">Services You Offer</label>
-                                <textarea
-                                    id="provider-service"
-                                    name="provider-service"
-                                    rows="3"
-                                    required
-                                    className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 focus:z-10 sm:text-sm"
-                                    placeholder="Briefly describe the services you can offer (e.g., 'Home security installations', 'Tenant background checks', 'Local deliveries')"
-                                    value={providerService}
-                                    onChange={(e) => setProviderService(e.target.value)}
-                                ></textarea>
-                            </div>
-                        </div>
-
-                        <div>
-                            <button
-                                type="submit"
-                                className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 transition-colors"
-                                disabled={loading}
-                            >
-                                {loading ? <LoadingSpinner message="Submitting..." /> : 'Submit Application'}
-                            </button>
-                        </div>
-                    </form>
-                )}
-                <div className="text-center text-sm mt-4">
-                    <button onClick={() => onNavigate('home')} className="font-medium text-amber-600 hover:text-amber-500">Back to Home</button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const PricingPage = ({ onNavigate }) => {
-    const pricingTiers = [
+    // Mock data storage (in-memory, resets on refresh)
+    const [mockProblems, setMockProblems] = useState([
         {
+            id: crypto.randomUUID(),
+            title: 'Leaky Faucet Repair',
+            description: 'My kitchen faucet has a steady drip, needs repair or replacement.',
+            category: 'Plumbing',
+            location: 'Pretoria',
+            estimatedBudget: 500,
+            requesterId: 'mock-member-alice', // Pre-existing user
+            status: 'open',
+            isApproved: true,
+            createdAt: new Date(Date.now() - 86400000 * 5),
+            quotes: [
+                { id: crypto.randomUUID(), providerId: 'mock-provider-alpha', providerName: 'Alpha Services', amount: 150, details: 'Standard repair, parts included.', status: 'pending', proposedStartDate: '2025-07-01', proposedEndDate: '2025-07-02', createdAt: new Date(Date.now() - 86400000 * 4) },
+                { id: crypto.randomUUID(), providerId: 'mock-provider-beta', providerName: 'Beta Fixers', amount: 120, details: 'Will inspect and fix, lowest price.', status: 'pending', proposedStartDate: '2025-07-03', proposedEndDate: '2025-07-03', createdAt: new Date(Date.now() - 86400000 * 3) },
+            ]
+        },
+        {
+            id: crypto.randomUUID(),
+            title: 'Garden Landscaping',
+            description: 'Need basic landscaping for a small backyard. Ideas welcome.',
+            category: 'Gardening',
+            location: 'Durban',
+            estimatedBudget: 2500,
+            requesterId: 'mock-member-bob', // Pre-existing user
+            status: 'open',
+            isApproved: true,
+            createdAt: new Date(Date.now() - 86400000 * 2),
+            quotes: [
+                 { id: crypto.randomUUID(), providerId: 'mock-provider-charlie', providerName: 'Charlie Gardens', amount: 500, details: 'Includes design and plant selection.', status: 'pending', proposedStartDate: '2025-07-10', proposedEndDate: '2025-07-15', createdAt: new Date(Date.now() - 86400000 * 1) },
+            ]
+        },
+         {
+            id: crypto.randomUUID(),
+            title: 'Broken Washing Machine',
+            description: 'Washing machine not spinning. Believe it is a motor issue.',
+            category: 'Appliance Repair',
+            location: 'Cape Town',
+            estimatedBudget: 800,
+            requesterId: 'mock-member-bob',
+            status: 'closed',
+            isApproved: true,
+            acceptedQuoteId: 'mock-quote-gamma',
+            createdAt: new Date(Date.now() - 86400000 * 10),
+            quotes: [
+                { id: crypto.randomUUID(), providerId: 'mock-provider-delta', providerName: 'Delta Appliances', amount: 300, details: 'Motor replacement cost.', status: 'pending', proposedStartDate: '2025-06-20', proposedEndDate: '2025-06-21', createdAt: new Date(Date.now() - 86400000 * 9) },
+                { id: 'mock-quote-gamma', providerId: 'mock-provider-epsilon', providerName: 'Epsilon Repairs', amount: 250, details: 'Quick diagnosis and repair.', status: 'accepted', proposedStartDate: '2025-06-22', proposedEndDate: '2025-06-22', createdAt: new Date(Date.now() - 86400000 * 8) },
+            ]
+        },
+    ]);
+
+    // Mock other user profiles for MemberDetailsModal and ProviderApproval
+    const [mockUserProfiles, setMockUserProfiles] = useState({
+        'mock-member-alice': {
+            uid: 'mock-member-alice', name: 'Alice Member', email: 'alice@example.com', phone: '071-123-4567', role: 'member', isPaidMember: true, bio: 'A mock user looking for help.', address: '456 Oak Avenue, Johannesburg'
+        },
+        'mock-member-bob': {
+            uid: 'mock-member-bob', name: 'Bob Member', email: 'bob@example.com', phone: '082-222-3333', role: 'member', isPaidMember: false, bio: 'Another mock user.', address: '789 Pine Street, Cape Town'
+        },
+        'mock-provider-alpha': {
+            uid: 'mock-provider-alpha', name: 'Alpha Services', email: 'alpha@example.com', phone: '060-111-2222', role: 'provider', isProviderApproved: true, companyName: 'Alpha Plumbing', specialties: 'Plumbing', bio: 'Expert plumbers in Gauteng.', address: '101 Pipe Rd, Pretoria'
+        },
+         'mock-provider-beta': {
+            uid: 'mock-provider-beta', name: 'Beta Fixers', email: 'beta@example.com', phone: '073-333-4444', role: 'provider', isProviderApproved: true, companyName: 'Beta General', specialties: 'General Handyman', bio: 'Reliable handymen for all your needs.', address: '202 Tool St, Durban'
+        },
+         'mock-provider-charlie': {
+            uid: 'mock-provider-charlie', name: 'Charlie Gardens', email: 'charlie@example.com', phone: '084-555-6666', role: 'provider', isProviderApproved: false, companyName: 'Charlie Landscaping', specialties: 'Landscaping', bio: 'Creative landscaping solutions.', address: '303 Green Ave, Cape Town'
+        },
+         'mock-provider-delta': {
+            uid: 'mock-provider-delta', name: 'Delta Appliances', email: 'delta@example.com', phone: '079-777-8888', role: 'provider', isProviderApproved: true, companyName: 'Delta Repairs', specialties: 'Appliance Repair', bio: 'Fast and affordable appliance repairs.', address: '404 Repair Ln, Johannesburg'
+        },
+         'mock-provider-epsilon': {
+            uid: 'mock-provider-epsilon', name: 'Epsilon Repairs', email: 'epsilon@example.com', phone: '081-999-0000', role: 'provider', isProviderApproved: true, companyName: 'Epsilon Tech', specialties: 'Electronics Repair', bio: 'Specializing in electronics repair.', address: '505 Circuit Rd, Pretoria'
+        },
+        'admin-user': {
+            uid: 'admin-user', name: 'Admin Account', email: 'admin@example.com', phone: '000-000-0000', role: 'admin', isProviderApproved: undefined, isPaidMember: undefined, bio: 'System administrator.', address: 'Admin HQ'
+        }
+    });
+
+    // Mock Pricing Plans - Moved to central state for admin editing
+    const [mockPricingPlans, setMockPricingPlans] = useState([
+        {
+            id: 'bronze-plan', // Added unique ID for easier management
             name: 'Bronze',
-            price: 'R50',
-            frequency: '/month',
-            description: 'Basic access to community services.',
+            price: 'R50/month', // Updated to match plan codes.PNG
+            rawPrice: 50, // Added for numerical comparisons if needed
+            interval: 'monthly',
             features: [
-                'Access to Problem Listing platform',
-                'Basic community support resources',
-                'Emergency contact directory'
+                'Post up to 5 problems',
+                'View basic problem details',
+                'Community support'
             ],
-            buttonText: 'Get Started (Current)'
+            paystackLink: 'https://paystack.shop/pay/PLN_ot4wcmec30yw311', // Updated with actual plan code
+            planCode: 'PLN_ot4wcmec30yw311', // Added plan code
         },
         {
+            id: 'silver-plan',
             name: 'Silver',
-            price: 'R150',
-            frequency: '/month',
-            description: 'Enhanced access with priority support.',
+            price: 'R150/month', // Updated to match plan codes.PNG
+            rawPrice: 150,
+            interval: 'monthly',
             features: [
-                'All Bronze features',
-                'Priority matching with providers',
-                'Dispute resolution support (limited)',
-                '1 free basic service consultation/month'
+                'Unlimited problem posts',
+                'View all problem details',
+                'Submit and manage quotes',
+                'Priority support'
             ],
-            buttonText: 'Choose Silver'
+            paystackLink: 'https://paystack.shop/pay/PLN_9zom3j5yjqjox10', // Updated with actual plan code
+            planCode: 'PLN_9zom3j5yjqjox10', // Added plan code
         },
         {
+            id: 'gold-plan',
             name: 'Gold',
-            price: 'R300',
-            frequency: '/month',
-            description: 'Premium benefits for comprehensive support.',
+            price: 'R300/month', // Updated to match plan codes.PNG
+            rawPrice: 300,
+            interval: 'monthly',
             features: [
                 'All Silver features',
+                'Advanced analytics',
                 'Dedicated account manager',
-                'Unlimited dispute resolution support',
-                '2 free basic service consultations/month',
-                'Exclusive early access to new services'
+                'Early access to features'
             ],
-            buttonText: 'Choose Gold'
+            paystackLink: 'https://paystack.shop/pay/PLN_2cun96f18ckdlzd', // Updated with actual plan code
+            planCode: 'PLN_2cun96f18ckdlzd', // Added plan code
         },
         {
+            id: 'platinum-plan',
             name: 'Platinum',
-            price: 'R500',
-            frequency: '/month',
-            description: 'Ultimate safety and convenience package.',
+            price: 'R500/month', // Updated to match plan codes.PNG
+            rawPrice: 500,
+            interval: 'monthly',
             features: [
                 'All Gold features',
-                '24/7 priority emergency response coordination',
-                'Personalized security advisory',
-                'Concierge service for errands',
-                'Annual security audit of your property'
+                'Premium partner listings',
+                'Exclusive workshops',
+                'API access'
             ],
-            buttonText: 'Choose Platinum'
+            paystackLink: 'https://paystack.shop/pay/PLN_zy6223r71ftmy11', // Updated with actual plan code
+            planCode: 'PLN_zy6223r71ftmy11', // Added plan code
         },
-    ];
+    ]);
 
-    return (
-        <div className="min-h-screen bg-amber-50 py-12 px-4 sm:px-6 lg:px-8">
-            <header className="bg-amber-800 text-white shadow-lg mb-8 rounded-lg">
-                <nav className="container mx-auto px-6 py-4 flex justify-between items-center">
-                    <img src="https://i.ibb.co/WNnqYmPf/MO-Official-Logo.png" alt="MO-Official-Logo" className="w-20 h-20 md:w-24 md:h-24 object-contain" />
-                    <button onClick={() => onNavigate('home')} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Back to Home</button>
-                </nav>
-            </header>
-            <div className="max-w-7xl mx-auto">
-                <div className="text-center mb-12">
-                    <h2 className="text-4xl font-extrabold text-gray-900 mb-4">Choose Your Mphakathi Membership</h2>
-                    <p className="text-lg text-gray-600">Select a plan that best fits your needs and budget. Each tier connects you to a wider range of community support and verified service providers.</p>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-                    {pricingTiers.map((tier) => (
-                        <div key={tier.name} className="bg-white rounded-lg shadow-xl p-8 flex flex-col items-center text-center border-t-8 border-amber-600 transition-transform transform hover:scale-105">
-                            <h3 className="text-2xl font-bold text-gray-800 mb-2">{tier.name}</h3>
-                            <p className="text-4xl font-extrabold text-amber-800 mb-4">{tier.price} <span className="text-xl font-medium text-gray-600">{tier.frequency}</span></p>
-                            <p className="text-gray-600 text-sm mb-6">{tier.description}</p>
-                            <ul className="text-gray-700 text-left space-y-2 mb-8 flex-grow">
-                                {tier.features.map((feature, index) => (
-                                    <li key={index} className="flex items-start">
-                                        <CheckCircleIcon size={20} className="text-green-500 mr-2 flex-shrink-0" />
-                                        <span>{feature}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                            <button className="mt-auto w-full py-3 px-6 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700 transition duration-300">
-                                {tier.buttonText}
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const ProblemListsPage = ({ onNavigate }) => {
-    const [problems, setProblems] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [searchLocation, setSearchLocation] = useState('');
-    const [searchCategory, setSearchCategory] = useState('');
-    const [searchBudget, setSearchBudget] = useState('');
-
-    const locations = ['All', 'Soweto - Zone 1', 'Soweto - Zone 2', 'Soweto - Zone 3', 'General'];
-    const categories = ['All', ...serviceCategories.map(cat => cat.id)]; // 'security', 'asset', etc.
-
+    // Effect to initialize user profile on first load (e.g., if starting logged out)
     useEffect(() => {
-        const fetchProblems = () => {
-            setLoading(true);
-            let q = collection(db, `artifacts/${appId}/serviceRequests`);
-            let filters = [];
+        if (userProfile.uid === '') { // Only if uid is initially empty (loggedOut state)
+            const newUserId = crypto.randomUUID();
+            setUserId(newUserId);
+            setUserProfile(prev => ({ ...prev, uid: newUserId }));
+            // Add this new user to mockUserProfiles
+            setMockUserProfiles(prev => ({
+                ...prev,
+                [newUserId]: { ...userProfile, uid: newUserId }
+            }));
+        } else {
+             // Ensure the current userProfile is always in mockUserProfiles
+            setMockUserProfiles(prev => ({
+                ...prev,
+                [userId]: { ...prev[userId], ...userProfile, uid: userId }
+            }));
+        }
+    }, [userId]); // Only re-run if userId changes (initial setup)
 
-            // Add filters based on search criteria
-            if (searchCategory && searchCategory !== 'All') {
-                filters.push(where("category", "==", searchCategory));
-            }
-            if (searchLocation && searchLocation !== 'All') {
-                filters.push(where("location", "==", searchLocation));
-            }
-            // For budget, we can filter client-side or implement range queries if needed
-            // For simplicity, we'll fetch all matching other filters and then filter by budget client-side.
-            // All problems on this page are 'pending' and unassigned for providers to pick up
-            filters.push(where("status", "==", "pending"));
-            filters.push(where("providerId", "==", null));
+    // Handle posting new problem (moved from ProblemListPage)
+    const handlePostProblem = (problemData) => {
+        const newProblem = {
+            id: crypto.randomUUID(),
+            title: problemData.title,
+            description: problemData.description,
+            category: problemData.category,
+            location: problemData.location,
+            estimatedBudget: parseFloat(problemData.estimatedBudget),
+            requesterId: userId,
+            status: 'open',
+            isApproved: false, // New problems require admin approval
+            createdAt: new Date(),
+            quotes: [] // Initialize with empty quotes array
+        };
+        setMockProblems(prevProblems => [newProblem, ...prevProblems]);
+        setShowPostProblemModal(false); // Close modal on save
+        setMessage({ type: 'success', text: 'Problem posted successfully! Awaiting admin approval.' });
+    };
 
-            // Apply filters to query
-            let finalQuery = query(q, ...filters);
-
-            const unsubscribe = onSnapshot(finalQuery, (snapshot) => {
-                let fetchedProblems = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data(),
-                    createdAt: doc.data().createdAt?.toDate().toLocaleString()
-                }));
-
-                // Client-side budget filter
-                if (searchBudget) {
-                    const budgetValue = parseFloat(searchBudget);
-                    if (!isNaN(budgetValue)) {
-                        fetchedProblems = fetchedProblems.filter(problem => {
-                            // Assuming budget is stored as a number in the problem document
-                            return problem.budget && problem.budget <= budgetValue;
-                        });
-                    }
-                }
-                
-                // Sort by creation date (most recent first)
-                fetchedProblems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-                setProblems(fetchedProblems);
-                setLoading(false);
-            }, (error) => {
-                console.error("Error fetching problems:", error);
-                setLoading(false);
-            });
-
-            return () => unsubscribe();
+    // Generic registration handler
+    const handleRegister = (newUserData, roleType, isPaid = false) => {
+        const newUid = crypto.randomUUID();
+        const newUserProfile = {
+            uid: newUid,
+            name: newUserData.name,
+            email: newUserData.email,
+            phone: newUserData.phone,
+            role: roleType,
+            isProviderApproved: roleType === 'provider' ? false : undefined, // Providers need approval
+            isPaidMember: isPaid,
+            bio: newUserData.bio || '',
+            address: newUserData.address || '',
+            companyName: newUserData.companyName || undefined,
+            specialties: newUserData.specialties || undefined,
         };
 
-        fetchProblems();
-    }, [searchLocation, searchCategory, searchBudget]); // Re-run when filters change
+        setMockUserProfiles(prev => ({
+            ...prev,
+            [newUid]: newUserProfile
+        }));
+        setUserId(newUid);
+        setUserProfile(newUserProfile);
+        setUserRole(newUserProfile.role);
+        setIsPaidMember(newUserProfile.isPaidMember);
+        setMessage({ type: 'success', text: `Welcome, ${newUserData.name}! You are now registered as a ${roleType}.` });
+        setCurrentPage('dashboard');
+        setShowRegisterModal(false);
+    };
+
+    // Handle becoming a paid member after selecting a plan and filling form
+    const handleBecomePaidMember = (newUserData, selectedPlanDetails) => {
+        // Find the user if they already exist (e.g., free member upgrading)
+        let existingUser = mockUserProfiles[userId];
+
+        // If the current user is logged out, create a new one based on form data
+        // If current user is a free member, update their profile
+        const newUid = userRole === 'loggedOut' ? crypto.randomUUID() : userId;
+
+        const updatedProfile = {
+            ...existingUser, // Start with existing data if available
+            uid: newUid,
+            name: newUserData.name || existingUser?.name || `New Member ${newUid.substring(0,4)}`,
+            email: newUserData.email || existingUser?.email || `newmember-${newUid.substring(0,4)}@example.com`,
+            phone: newUserData.phone || existingUser?.phone || '',
+            role: 'member', // Always 'member' after this flow
+            isPaidMember: true, // Key change: now a paid member
+            bio: newUserData.bio || existingUser?.bio || '',
+            address: newUserData.address || existingUser?.address || '',
+            // Clear provider-specific fields if they were in provider registration flow and switching to member
+            companyName: undefined,
+            specialties: undefined,
+            isProviderApproved: undefined,
+        };
+
+        setMockUserProfiles(prev => ({
+            ...prev,
+            [newUid]: updatedProfile
+        }));
+        setUserId(newUid);
+        setUserProfile(updatedProfile);
+        setUserRole('member');
+        setIsPaidMember(true);
+        setSelectedPlan(null); // Clear selected plan
+        setMessage({ type: 'success', text: `Congratulations! You are now a Paid Member (${selectedPlanDetails.name}).` });
+        setCurrentPage('problems'); // Redirect to problem listings after successful payment
+    };
+
+
+    const handleLoginAs = (role) => {
+        let newUserId;
+        let newProfile;
+
+        if (role === 'loggedOut') {
+            newUserId = crypto.randomUUID(); // Give a new ID for a guest session
+            newProfile = {
+                uid: '', // No actual UID for logged out guest, set to empty
+                name: 'Guest User',
+                email: '',
+                phone: '',
+                role: 'loggedOut',
+                isProviderApproved: false,
+                isPaidMember: false,
+                bio: '',
+                address: ''
+            };
+        } else if (role === 'admin') {
+            newUserId = 'admin-user';
+            newProfile = mockUserProfiles['admin-user'];
+        } else { // member or provider (existing mock users for quick testing)
+            if (role === 'member') {
+                // Pick one of the mock members
+                newUserId = isPaidMember ? 'mock-member-alice' : 'mock-member-bob';
+                newProfile = mockUserProfiles[newUserId];
+            } else if (role === 'provider') {
+                // Pick one of the mock providers
+                newUserId = Math.random() < 0.5 ? 'mock-provider-alpha' : 'mock-provider-charlie';
+                newProfile = mockUserProfiles[newUserId];
+            }
+        }
+        setUserId(newUserId);
+        setUserProfile(newProfile);
+        setUserRole(newProfile.role);
+        setIsPaidMember(newProfile.isPaidMember || false); // Ensure it's boolean
+        setCurrentPage('dashboard');
+        setMessage({ type: '', text: '' }); // Clear any previous messages
+    };
+
+
+    // Determine the header title and status based on role
+    const headerTitle = userProfile?.name || 'Guest';
+    let statusText = '';
+    let statusColorClass = '';
+
+    if (userRole === 'loggedOut') {
+        statusText = 'Logged Out';
+        statusColorClass = 'bg-gray-100 text-gray-800';
+    } else if (userRole === 'admin') {
+        statusText = 'Administrator';
+        statusColorClass = 'bg-purple-100 text-purple-800';
+    } else if (userRole === 'provider') {
+        statusText = userProfile?.isProviderApproved ? 'Approved Provider' : 'Pending Approval';
+        statusColorClass = userProfile?.isProviderApproved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+    } else { // member
+        statusText = isPaidMember ? 'Paid Member' : 'Free Member';
+        statusColorClass = isPaidMember ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800';
+    }
+
 
     return (
-        <div className="min-h-screen bg-amber-50 py-12 px-4 sm:px-6 lg:px-8">
-            <header className="bg-amber-800 text-white shadow-lg mb-8 rounded-lg">
-                <nav className="container mx-auto px-6 py-4 flex justify-between items-center">
-                    <img src="https://i.ibb.co/WNnqYmPf/MO-Official-Logo.png" alt="MO-Official-Logo" className="w-20 h-20 md:w-24 md:h-24 object-contain" />
-                    <button onClick={() => onNavigate('home')} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Back to Home</button>
-                </nav>
-            </header>
-            <div className="max-w-7xl mx-auto">
-                <div className="text-center mb-12">
-                    <h2 className="text-4xl font-extrabold text-gray-900 mb-4">Mphakathi Problem Listings</h2>
-                    <p className="text-lg text-gray-600">Browse problems posted by community members. Providers can filter and view available requests to offer their services.</p>
-                </div>
-
-                {/* Filter/Search Section */}
-                <div className="bg-white p-6 rounded-lg shadow-md mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                        <label htmlFor="location-filter" className="block text-sm font-medium text-gray-700">Location:</label>
-                        <select
-                            id="location-filter"
-                            value={searchLocation}
-                            onChange={(e) => setSearchLocation(e.target.value)}
-                            className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm rounded-md"
-                        >
-                            {locations.map(loc => (
-                                <option key={loc} value={loc}>{loc}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label htmlFor="category-filter" className="block text-sm font-medium text-gray-700">Category:</label>
-                        <select
-                            id="category-filter"
-                            value={searchCategory}
-                            onChange={(e) => setSearchCategory(e.target.value)}
-                            className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm rounded-md"
-                        >
-                            {categories.map(cat => (
-                                <option key={cat} value={cat}>{cat === 'All' ? 'All Categories' : serviceCategories.find(s => s.id === cat)?.name || cat}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label htmlFor="budget-filter" className="block text-sm font-medium text-gray-700">Max Budget (R):</label>
-                        <input
-                            type="number"
-                            id="budget-filter"
-                            value={searchBudget}
-                            onChange={(e) => setSearchBudget(e.target.value)}
-                            placeholder="e.g., 500"
-                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                        />
-                    </div>
-                </div>
-
-                {loading ? (
-                    <LoadingSpinner message="Loading problems..." />
-                ) : problems.length === 0 ? (
-                    <p className="text-center text-gray-600 p-6 bg-white rounded-lg shadow-md">No problems found matching your criteria.</p>
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {problems.map(problem => (
-                            <div key={problem.id} className="bg-white p-6 rounded-lg shadow-md border-t-4 border-blue-600">
-                                <h3 className="text-xl font-bold text-gray-800 mb-2">{problem.title}</h3>
-                                <p className="text-gray-600 text-sm mb-3">{problem.description}</p>
-                                <p className="text-xs text-gray-500 mb-1">Category: <span className="font-semibold capitalize">{serviceCategories.find(s => s.id === problem.category)?.name || problem.category}</span></p>
-                                <p className="text-xs text-gray-500 mb-1">Location: <span className="font-semibold">{problem.location || 'N/A'}</span></p>
-                                {problem.budget && <p className="text-xs text-gray-500 mb-1">Budget: <span className="font-semibold">R {problem.budget}</span></p>}
-                                <p className="text-xs text-gray-400">Posted by: {problem.memberName} on {problem.createdAt}</p>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
-
-// --- Member Dashboard Pages ---
-
-const MemberDashboardLayout = ({ children, onNavigate, userProfile, handleSignOut }) => {
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-    return (
-        <div className="flex min-h-screen bg-amber-50">
-            {/* Sidebar for larger screens */}
-            <aside className={`w-64 bg-amber-800 text-white p-6 space-y-6 hidden md:block flex-shrink-0`}>
-                <h2 className="text-2xl font-bold mb-6">Member Dashboard</h2>
-                <nav>
-                    <ul>
-                        <li className="mb-4"><button onClick={() => onNavigate('memberDashboard')} className="flex items-center text-white hover:text-amber-200 transition duration-200"><HomeIcon className="mr-3" size={20} /> Dashboard</button></li>
-                        <li className="mb-4"><button onClick={() => onNavigate('memberProfile')} className="flex items-center text-white hover:text-amber-200 transition duration-200"><UserIcon className="mr-3" size={20} /> Profile</button></li>
-                        <li className="mb-4"><button onClick={() => onNavigate('memberRequests')} className="flex items-center text-white hover:text-amber-200 transition duration-200"><PlusCircleIcon className="mr-3" size={20} /> My Requests</button></li>
-                        <li className="mb-4"><button onClick={() => onNavigate('memberPayments')} className="flex items-center text-white hover:text-amber-200 transition duration-200"><DollarSignIcon className="mr-3" size={20} /> Payments</button></li>
-                        <li className="mb-4"><button onClick={() => onNavigate('home')} className="flex items-center text-white hover:text-amber-200 transition duration-200"><HomeIcon className="mr-3" size={20} /> Back to Home</button></li>
-                        <li className="mb-4"><button onClick={handleSignOut} className="flex items-center text-white hover:text-amber-200 transition duration-200"><LogOutIcon className="mr-3" size={20} /> Logout</button></li>
-                    </ul>
-                </nav>
-            </aside>
-
-            {/* Mobile Header */}
-            <header className="bg-amber-800 text-white p-4 flex justify-between items-center md:hidden w-full">
-                <h2 className="text-xl font-bold">Member Dashboard</h2>
-                <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="text-white focus:outline-none">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path>
-                    </svg>
-                </button>
-            </header>
-
-            {/* Mobile Sidebar */}
-            {isSidebarOpen && (
-                <div className="fixed inset-0 bg-gray-900 bg-opacity-75 z-40 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>
-            )}
-            <aside className={`fixed inset-y-0 left-0 w-64 bg-amber-800 text-white p-6 space-y-6 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out md:hidden z-50`}>
-                <button onClick={() => setIsSidebarOpen(false)} className="absolute top-4 right-4 text-white text-3xl">&times;</button>
-                <h2 className="text-2xl font-bold mb-6">Member Menu</h2>
-                <nav>
-                    <ul>
-                        <li className="mb-4"><button onClick={() => { onNavigate('memberDashboard'); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-amber-200 transition duration-200"><HomeIcon className="mr-3" size={20} /> Dashboard</button></li>
-                        <li className="mb-4"><button onClick={() => { onNavigate('memberProfile'); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-amber-200 transition duration-200"><UserIcon className="mr-3" size={20} /> Profile</button></li>
-                        <li className="mb-4"><button onClick={() => { onNavigate('memberRequests'); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-amber-200 transition duration-200"><PlusCircleIcon className="mr-3" size={20} /> My Requests</button></li>
-                        <li className="mb-4"><button onClick={() => { onNavigate('memberPayments'); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-amber-200 transition duration-200"><DollarSignIcon className="mr-3" size={20} /> Payments</button></li>
-                        <li className="mb-4"><button onClick={() => { onNavigate('home'); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-amber-200 transition duration-200"><HomeIcon className="mr-3" size={20} /> Back to Home</button></li>
-                        <li className="mb-4"><button onClick={() => { handleSignOut(); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-amber-200 transition duration-200"><LogOutIcon className="mr-3" size={20} /> Logout</button></li>
-                    </ul>
-                </nav>
-            </aside>
-
-            {/* Main content */}
-            <div className="flex-1 flex flex-col">
-                <header className="bg-white shadow p-4 md:p-6 flex items-center justify-between">
-                    <h1 className="text-2xl font-bold text-gray-800">
-                        Welcome, {userProfile?.name || 'Member'}!
-                    </h1>
-                    <span className={`px-3 py-1 rounded-full text-sm font-semibold ${userProfile?.membershipStatus === 'Active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                        {userProfile?.membershipStatus || 'Status Unavailable'}
-                    </span>
-                </header>
-                <main className="flex-1 p-4 md:p-8 overflow-y-auto">
-                    {children}
-                </main>
-            </div>
-        </div>
-    );
-};
-
-const MemberDashboardPage = ({ userProfile, onNavigate }) => {
-    return (
-        <div className="space-y-8">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">Dashboard Overview</h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {/* Membership Status Card */}
-                <div className="bg-white p-6 rounded-lg shadow-md flex items-center space-x-4">
-                    <AwardIcon className="text-amber-600" size={36} />
-                    <div>
-                        <h3 className="text-lg font-semibold text-gray-700">Membership Status</h3>
-                        <p className={`text-xl font-bold ${userProfile?.membershipStatus === 'Active' ? 'text-green-600' : 'text-red-600'}`}>
-                            {userProfile?.membershipStatus || 'N/A'}
-                        </p>
-                        {userProfile?.membershipStatus === 'Free' && (
-                            <button onClick={() => onNavigate('memberPayments')} className="text-amber-600 text-sm mt-1 hover:underline">Upgrade Now</button>
+        <AppContext.Provider value={{
+            userId, userProfile, setUserProfile, userRole, setUserRole, isPaidMember, setIsPaidMember,
+            mockProblems, setMockProblems, mockUserProfiles, setMockUserProfiles,
+            mockPricingPlans, setMockPricingPlans, // Provide pricing plans
+            appName, setAppName, // Provide app name state
+            appLogo, setAppLogo, // Provide app logo state
+            setShowPostProblemModal,
+            setMessage, // Provide setMessage globally
+            handleRegister, // Provide general registration handler
+            handleBecomePaidMember, // Provide paid membership handler
+            setSelectedPlan, // Provide setter for selected plan
+        }}>
+            <div className="min-h-screen flex bg-gray-100 font-sans">
+                {/* Sidebar */}
+                <aside className="w-64 bg-[#964b00] text-white flex flex-col rounded-tr-lg rounded-br-lg shadow-lg">
+                    <div className="p-4 md:p-6 text-center border-b border-[#b3641a]">
+                        {appLogo && (
+                            <img
+                                src={appLogo}
+                                alt={`${appName} Logo`}
+                                className="mx-auto mb-4 w-24 h-auto rounded-md"
+                                onError={(e) => { e.target.onerror = null; e.target.src="https://placehold.co/100x40/964b00/ffffff?text=Logo"; }} // Fallback
+                            />
                         )}
-                    </div>
-                </div>
-
-                {/* Quick Actions */}
-                <div className="bg-white p-6 rounded-lg shadow-md">
-                    <h3 className="text-lg font-semibold text-gray-700 mb-4">Quick Actions</h3>
-                    <div className="space-y-2">
-                        <button onClick={() => onNavigate('memberRequests')} className="w-full text-left flex items-center px-4 py-2 bg-amber-100 text-amber-800 rounded-md hover:bg-amber-200 transition"><PlusCircleIcon className="mr-2" size={20} /> Make a new request</button>
-                        <button onClick={() => onNavigate('memberProfile')} className="w-full text-left flex items-center px-4 py-2 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 transition"><UserIcon className="mr-2" size={20} /> Update my profile</button>
-                    </div>
-                </div>
-
-                {/* Announcements/Tips */}
-                <div className="bg-white p-6 rounded-lg shadow-md">
-                    <h3 className="text-lg font-semibold text-gray-700 mb-4">Community News</h3>
-                    <ul className="text-sm text-gray-600 space-y-2">
-                        <li className="flex items-start"><InfoIcon size={16} className="mr-2 mt-1 text-blue-500 flex-shrink-0" /> Important: Verify provider credentials before service.</li>
-                        <li className="flex items-start"><InfoIcon size={16} className="mr-2 mt-1 text-blue-500 flex-shrink-0" /> Reminder: Keep your contact info updated in your profile!</li>
-                    </ul>
-                </div>
-            </div>
-
-            {/* Recent Activity / Requests */}
-            <div className="bg-white p-6 rounded-lg shadow-md mt-8">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">Your Recent Activity</h3>
-                <p className="text-gray-600">No recent activities to display. Make a new request to get started!</p>
-                {/* In a real app, you'd fetch and display recent requests/payments here */}
-                <button onClick={() => onNavigate('memberRequests')} className="mt-4 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">View All Requests</button>
-            </div>
-        </div>
-    );
-};
-
-const MemberProfilePage = ({ userProfile, userId, setShowModal, setModalContent }) => {
-    const [editing, setEditing] = useState(false);
-    const [name, setName] = useState(userProfile?.name || '');
-    const [contact, setContact] = useState(userProfile?.contact || '');
-    const [address, setAddress] = useState(userProfile?.address || '');
-    const [loading, setLoading] = useState(false);
-
-    useEffect(() => {
-        if (userProfile) {
-            setName(userProfile.name || '');
-            setContact(userProfile.contact || '');
-            setAddress(userProfile.address || '');
-        }
-    }, [userProfile]);
-
-    const handleSave = async () => {
-        setLoading(true);
-        try {
-            const userDocRef = doc(db, `artifacts/${appId}/users/${userId}/profile/doc`);
-            await updateDoc(userDocRef, {
-                name,
-                contact,
-                address,
-                lastUpdated: serverTimestamp()
-            });
-            setShowModal(true);
-            setModalContent({ title: "Profile Updated", message: "Your profile has been successfully updated." });
-            setEditing(false);
-        } catch (error) {
-            console.error("Error updating profile:", error);
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "Failed to update profile. Please try again." });
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="bg-white p-8 rounded-lg shadow-md max-w-2xl mx-auto">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">My Profile</h2>
-            {loading && <LoadingSpinner />}
-            <div className="space-y-4">
-                <div>
-                    <label className="block text-sm font-medium text-gray-700">Name</label>
-                    {editing ? (
-                        <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
-                    ) : (
-                        <p className="mt-1 text-lg text-gray-900">{userProfile?.name || 'N/A'}</p>
-                    )}
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700">Email</label>
-                    <p className="mt-1 text-lg text-gray-900">{userProfile?.email || 'N/A'}</p>
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700">Contact Number</label>
-                    {editing ? (
-                        <input type="text" value={contact} onChange={(e) => setContact(e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
-                    ) : (
-                        <p className="mt-1 text-lg text-gray-900">{userProfile?.contact || 'N/A'}</p>
-                    )}
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700">Address</label>
-                    {editing ? (
-                        <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
-                    ) : (
-                        <p className="mt-1 text-lg text-gray-900">{userProfile?.address || 'N/A'}</p>
-                    )}
-                </div>
-                <div className="pt-4 flex justify-end space-x-3">
-                    {editing ? (
-                        <>
-                            <button onClick={() => setEditing(false)} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition" disabled={loading}>Cancel</button>
-                            <button onClick={handleSave} className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition" disabled={loading}>Save Changes</button>
-                        </>
-                    ) : (
-                        <button onClick={() => setEditing(true)} className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition">Edit Profile</button>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const MemberRequestsPage = ({ userId, userProfile, setShowModal, setModalContent }) => {
-    const [requests, setRequests] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [showNewRequestModal, setShowNewRequestModal] = useState(false);
-    const [newRequestTitle, setNewRequestTitle] = useState('');
-    const [newRequestDescription, setNewRequestDescription] = useState('');
-    const [newRequestCategory, setNewRequestCategory] = useState(serviceCategories[0].id); // Default category
-    const [newRequestLocation, setNewRequestLocation] = useState('Soweto - Zone 1'); // Default location
-    const [newRequestBudget, setNewRequestBudget] = useState(''); // Optional budget
-
-    const locations = ['Soweto - Zone 1', 'Soweto - Zone 2', 'Soweto - Zone 3', 'General'];
-
-    useEffect(() => {
-        if (!userId) {
-            setLoading(false);
-            setRequests([]);
-            return;
-        }
-
-        const q = query(
-            collection(db, `artifacts/${appId}/serviceRequests`),
-            where("memberId", "==", userId)
-        );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const fetchedRequests = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                createdAt: doc.data().createdAt?.toDate().toLocaleString(),
-                updatedAt: doc.data().updatedAt?.toDate().toLocaleString()
-            }));
-            // Sort by creation date (most recent first)
-            fetchedRequests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            setRequests(fetchedRequests);
-            setLoading(false);
-        }, (error) => {
-            console.error("Error fetching requests:", error);
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "Failed to load requests." });
-            setLoading(false);
-        });
-
-        return () => unsubscribe();
-    }, [userId, setShowModal, setModalContent]);
-
-    const handleCreateRequest = async (e) => {
-        e.preventDefault();
-        if (!userId || !userProfile) {
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "You must be logged in to create a request." });
-            return;
-        }
-
-        setLoading(true);
-        try {
-            await addDoc(collection(db, `artifacts/${appId}/serviceRequests`), {
-                memberId: userId,
-                memberName: userProfile.name || 'Anonymous Member',
-                title: newRequestTitle,
-                description: newRequestDescription,
-                category: newRequestCategory,
-                location: newRequestLocation,
-                budget: newRequestBudget ? parseFloat(newRequestBudget) : null,
-                status: 'pending', // pending, assigned, completed, cancelled
-                providerId: null,
-                assignedProviderName: null,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-            });
-            setShowNewRequestModal(false);
-            setNewRequestTitle('');
-            setNewRequestDescription('');
-            setNewRequestCategory(serviceCategories[0].id);
-            setNewRequestLocation('Soweto - Zone 1');
-            setNewRequestBudget('');
-            setShowModal(true);
-            setModalContent({ title: "Request Submitted", message: "Your service request has been submitted successfully and will be visible to providers." });
-        } catch (error) {
-            console.error("Error creating request:", error);
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "Failed to create request. Please try again." });
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="space-y-8">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">My Service Requests / Problems Posted</h2>
-
-            <button
-                onClick={() => setShowNewRequestModal(true)}
-                className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg flex items-center mb-6 transition duration-300"
-            >
-                <PlusCircleIcon className="mr-2" size={20} /> Post a New Problem/Request
-            </button>
-
-            {loading ? (
-                <LoadingSpinner message="Loading your requests..." />
-            ) : requests.length === 0 ? (
-                <p className="text-gray-600 p-4 bg-white rounded-lg shadow-md">You haven't posted any service requests/problems yet.</p>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {requests.map(request => (
-                        <div key={request.id} className="bg-white p-6 rounded-lg shadow-md border-t-4 border-amber-600">
-                            <h3 className="text-xl font-bold text-gray-800 mb-2">{request.title}</h3>
-                            <p className="text-gray-600 mb-2">{request.description}</p>
-                            <p className="text-sm text-gray-500 mb-1">Category: <span className="font-semibold capitalize">{serviceCategories.find(c => c.id === request.category)?.name || request.category}</span></p>
-                            <p className="text-sm text-gray-500 mb-1">Location: <span className="font-semibold">{request.location || 'N/A'}</span></p>
-                            {request.budget && <p className="text-sm text-gray-500 mb-1">Budget: <span className="font-semibold">R {request.budget}</span></p>}
-                            <p className="text-sm text-gray-500 mb-1">Status: <span className={`font-semibold capitalize ${request.status === 'completed' ? 'text-green-600' : request.status === 'pending' ? 'text-orange-500' : 'text-blue-600'}`}>{request.status}</span></p>
-                            {request.assignedProviderName && (
-                                <p className="text-sm text-gray-500 mb-1">Assigned Provider: <span className="font-semibold">{request.assignedProviderName}</span></p>
-                            )}
-                            <p className="text-xs text-gray-400">Posted on: {request.createdAt}</p>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {/* New Request Modal */}
-            <Modal
-                show={showNewRequestModal}
-                title="Post a New Problem/Service Request"
-                onClose={() => setShowNewRequestModal(false)}
-            >
-                <form onSubmit={handleCreateRequest} className="space-y-4">
-                    <div>
-                        <label htmlFor="request-title" className="block text-sm font-medium text-gray-700">Request Title (Brief Summary)</label>
-                        <input
-                            type="text"
-                            id="request-title"
-                            value={newRequestTitle}
-                            onChange={(e) => setNewRequestTitle(e.target.value)}
-                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label htmlFor="request-description" className="block text-sm font-medium text-gray-700">Detailed Description of the Problem/Need</label>
-                        <textarea
-                            id="request-description"
-                            value={newRequestDescription}
-                            onChange={(e) => setNewRequestDescription(e.target.value)}
-                            rows="3"
-                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                            required
-                        ></textarea>
-                    </div>
-                    <div>
-                        <label htmlFor="request-category" className="block text-sm font-medium text-gray-700">Category of Service Needed</label>
-                        <select
-                            id="request-category"
-                            value={newRequestCategory}
-                            onChange={(e) => setNewRequestCategory(e.target.value)}
-                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                        >
-                            {serviceCategories.map(cat => (
-                                <option key={cat.id} value={cat.id}>{cat.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label htmlFor="request-location" className="block text-sm font-medium text-gray-700">Your Location</label>
-                        <select
-                            id="request-location"
-                            value={newRequestLocation}
-                            onChange={(e) => setNewRequestLocation(e.target.value)}
-                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                        >
-                            {locations.map(loc => (
-                                <option key={loc} value={loc}>{loc}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label htmlFor="request-budget" className="block text-sm font-medium text-gray-700">Approximate Budget (Optional, R)</label>
-                        <input
-                            type="number"
-                            id="request-budget"
-                            value={newRequestBudget}
-                            onChange={(e) => setNewRequestBudget(e.target.value)}
-                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                            placeholder="e.g., 500"
-                        />
-                    </div>
-                    <div className="flex justify-end space-x-4">
-                        <button type="button" onClick={() => setShowNewRequestModal(false)} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition">Cancel</button>
-                        <button type="submit" className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition" disabled={loading}>
-                            {loading ? <LoadingSpinner message="" /> : 'Post Request'}
-                        </button>
-                    </div>
-                </form>
-            </Modal>
-        </div>
-    );
-};
-
-const MemberPaymentsPage = ({ setShowModal, setModalContent, userProfile, userId }) => {
-    const [paystackLoading, setPaystackLoading] = useState(false);
-    const [showPaystackPopup, setShowPaystackPopup] = useState(false);
-
-    const handleUpgradeMembership = async () => {
-        if (userProfile?.membershipStatus === 'Active') {
-            setShowModal(true);
-            setModalContent({ title: "Membership Status", message: "Your membership is already active. No upgrade needed at this time." });
-            return;
-        }
-
-        setPaystackLoading(true);
-        setShowPaystackPopup(true);
-
-        // In a real application, you'd integrate with Paystack's API here to get a payment URL or initiate transaction.
-        // For this mock-up, we'll just open the shop link.
-        // After successful payment confirmation (which would be a webhook or callback in a real scenario):
-        // We'll simulate this after a delay and update membership status.
-        setTimeout(async () => {
-            setPaystackLoading(false);
-            await updateMembershipStatus('Active');
-            setShowModal(true);
-            setModalContent({ title: "Membership Activated!", message: "Welcome to Active Membership! Enjoy full Mphakathi benefits." });
-            setShowPaystackPopup(false); // Close the iframe after simulation
-        }, 3000); // Simulate network delay
-    };
-
-    const updateMembershipStatus = useCallback(async (status) => {
-        if (!userId) return;
-        try {
-            const userDocRef = doc(db, `artifacts/${appId}/users/${userId}/profile/doc`);
-            await updateDoc(userDocRef, {
-                membershipStatus: status,
-                lastMembershipUpdate: serverTimestamp()
-            });
-            // The onSnapshot in App.js will automatically update userProfile state
-        } catch (error) {
-            console.error("Error updating membership status:", error);
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "Failed to update membership status in database." });
-        }
-    }, [userId, setShowModal, setModalContent]);
-
-    return (
-        <div className="space-y-8">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">My Payments & Membership</h2>
-
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">Current Membership Plan</h3>
-                <p className="text-gray-700 text-lg mb-2">Status: <span className={`font-semibold ${userProfile?.membershipStatus === 'Active' ? 'text-green-600' : 'text-red-600'}`}>{userProfile?.membershipStatus || 'N/A'}</span></p>
-                <p className="text-gray-600 mb-4">Base Plan: R50 / month + R150 once-off joining fee</p>
-
-                {userProfile?.membershipStatus === 'Free' ? (
-                    <>
-                        <p className="text-amber-700 mb-4 font-semibold">Upgrade to 'Active' membership to unlock all benefits and services!</p>
-                        <button
-                            onClick={handleUpgradeMembership}
-                            className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300"
-                            disabled={paystackLoading}
-                        >
-                            {paystackLoading ? <LoadingSpinner message="Redirecting to Paystack..." /> : 'Upgrade to Active Membership'}
-                        </button>
-                    </>
-                ) : (
-                    <p className="text-green-600 font-semibold">You are enjoying full Mphakathi benefits!</p>
-                )}
-            </div>
-
-            {/* Paystack Popup */}
-            {showPaystackPopup && (
-                <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-[1000]">
-                    <div className="bg-white p-2 rounded-xl shadow-lg w-[95vw] h-[95vh] max-w-4xl max-h-[900px] flex flex-col">
-                        <div className="flex justify-between items-center p-3 border-b border-gray-200">
-                            <h3 className="text-xl font-bold text-gray-800">Complete Your Payment</h3>
-                            <button onClick={() => setShowPaystackPopup(false)} className="text-gray-500 hover:text-gray-700 text-3xl leading-none">&times;</button>
-                        </div>
-                        <div className="flex-grow flex items-center justify-center">
-                            {paystackLoading ? (
-                                <LoadingSpinner message="Loading Paystack..." />
-                            ) : (
-                                <iframe
-                                    src="https://paystack.shop/mphakathi-online"
-                                    width="100%"
-                                    height="100%"
-                                    frameBorder="0"
-                                    allowTransparency="true"
-                                    className="rounded-b-xl"
-                                ></iframe>
+                        <h2 className="text-2xl font-bold">
+                            {appName}
+                        </h2>
+                        <p className="text-sm text-gray-200 mt-1">ID: {userId || 'N/A'}</p> {/* Display N/A for logged out */}
+                         <div className="mt-4 flex flex-col space-y-2">
+                            <label className="text-sm text-gray-200">Switch User:</label>
+                            <select
+                                value={userRole === 'loggedOut' ? 'loggedOut' : userProfile.uid} // Use UID for specific mock users
+                                onChange={(e) => {
+                                    if (e.target.value === 'loggedOut') {
+                                        handleLoginAs('loggedOut');
+                                    } else if (e.target.value === 'admin-user') {
+                                        handleLoginAs('admin');
+                                    } else if (e.target.value.startsWith('mock-member')) {
+                                        setUserId(e.target.value);
+                                        setUserProfile(mockUserProfiles[e.target.value]);
+                                        setUserRole('member');
+                                        setIsPaidMember(mockUserProfiles[e.target.value].isPaidMember);
+                                        setCurrentPage('dashboard');
+                                    } else if (e.target.value.startsWith('mock-provider')) {
+                                         setUserId(e.target.value);
+                                        setUserProfile(mockUserProfiles[e.target.value]);
+                                        setUserRole('provider');
+                                        setCurrentPage('dashboard');
+                                    } else {
+                                        // Handle newly registered dynamic users
+                                        const foundUser = Object.values(mockUserProfiles).find(u => u.uid === e.target.value);
+                                        if (foundUser) {
+                                            setUserId(foundUser.uid);
+                                            setUserProfile(foundUser);
+                                            setUserRole(foundUser.role);
+                                            setIsPaidMember(foundUser.isPaidMember || false);
+                                            setCurrentPage('dashboard');
+                                        } else {
+                                            handleLoginAs(e.target.value); // Fallback to generic login if not static mock user
+                                        }
+                                    }
+                                }}
+                                className="p-2 rounded-md bg-[#7a3d00] text-white text-sm"
+                            >
+                                <option value="loggedOut">Logged Out</option>
+                                <option value="mock-member-alice">Member (Paid - Alice)</option>
+                                <option value="mock-member-bob">Member (Free - Bob)</option>
+                                <option value="mock-provider-alpha">Provider (Approved - Alpha)</option>
+                                <option value="mock-provider-charlie">Provider (Pending - Charlie)</option>
+                                <option value="admin-user">Admin</option>
+                                {Object.values(mockUserProfiles) // Add dynamically registered users
+                                    .filter(u => u.uid !== 'mock-member-alice' && u.uid !== 'mock-member-bob' && u.uid !== 'mock-provider-alpha' && u.uid !== 'mock-provider-charlie' && u.uid !== '' && u.role !== 'admin')
+                                    .map(u => (
+                                        <option key={u.uid} value={u.uid}>
+                                            {u.name} ({u.role} - {u.isPaidMember ? 'Paid' : u.role === 'member' ? 'Free' : (u.isProviderApproved ? 'Approved' : 'Pending')})
+                                        </option>
+                                    ))
+                                }
+                            </select>
+                            {userRole === 'member' && (
+                                <div className="flex items-center mt-2">
+                                    <input
+                                        type="checkbox"
+                                        id="paidMemberToggle"
+                                        checked={isPaidMember}
+                                        onChange={(e) => {
+                                            setIsPaidMember(e.target.checked);
+                                            setUserProfile(prev => ({ ...prev, isPaidMember: e.target.checked }));
+                                            setMessage({ type: 'info', text: 'Membership status updated (demo only). Upgrade via Pricing to persist.' });
+                                        }}
+                                        className="mr-2"
+                                        disabled // Disable in-app toggle for demo, encourage pricing page
+                                    />
+                                    <label htmlFor="paidMemberToggle" className="text-sm text-gray-200">Paid Member</label>
+                                </div>
                             )}
                         </div>
                     </div>
+                    <nav className="flex-1 mt-4">
+                        <ul>
+                            <li>
+                                <button
+                                    onClick={() => setCurrentPage('dashboard')}
+                                    className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
+                                        currentPage === 'dashboard' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
+                                    }`}
+                                >
+                                    <HomeIcon size={20} className="mr-3" />
+                                    Dashboard
+                                </button>
+                            </li>
+                            {userRole === 'loggedOut' && (
+                                <li>
+                                    <button
+                                        onClick={() => setShowRegisterModal(true)}
+                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 hover:bg-[#7a3d00] text-gray-100`}
+                                    >
+                                        <KeyIcon size={20} className="mr-3" />
+                                        Register
+                                    </button>
+                                </li>
+                            )}
+                            {userRole !== 'loggedOut' && (
+                                <li>
+                                    <button
+                                        onClick={() => setCurrentPage('profile')}
+                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
+                                            currentPage === 'profile' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
+                                        }`}
+                                    >
+                                        <UserIcon size={20} className="mr-3" />
+                                        Profile
+                                    </button>
+                                </li>
+                            )}
+                            <li>
+                                <button
+                                    onClick={() => setCurrentPage('problems')}
+                                    className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
+                                        currentPage === 'problems' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
+                                    }`}
+                                >
+                                    <FileTextIcon size={20} className="mr-3" />
+                                    Problem List
+                                </button>
+                            </li>
+                            {userRole === 'provider' && (
+                                <li>
+                                    <button
+                                        onClick={() => setCurrentPage('quotes')}
+                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
+                                            currentPage === 'quotes' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
+                                        }`}
+                                    >
+                                        <PackageIcon size={20} className="mr-3" />
+                                        My Quotes
+                                    </button>
+                                </li>
+                            )}
+                            {userRole === 'member' && (
+                                <li>
+                                    <button
+                                        onClick={() => setCurrentPage('my-requests')}
+                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
+                                            currentPage === 'my-requests' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
+                                        }`}
+                                    >
+                                        <CalendarIcon size={20} className="mr-3" />
+                                        My Requests
+                                    </button>
+                                </li>
+                            )}
+                            {userRole === 'admin' && (
+                                <li>
+                                    <button
+                                        onClick={() => setCurrentPage('admin-tools')}
+                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
+                                            currentPage === 'admin-tools' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
+                                        }`}
+                                    >
+                                        <ShieldCheckIcon size={20} className="mr-3" />
+                                        Admin Tools
+                                    </button>
+                                </li>
+                            )}
+                            {userRole !== 'loggedOut' && (
+                                <li>
+                                    <button
+                                        onClick={() => setCurrentPage('settings')}
+                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
+                                            currentPage === 'settings' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
+                                        }`}
+                                    >
+                                        <SettingsIcon size={20} className="mr-3" />
+                                        Settings
+                                    </button>
+                                </li>
+                            )}
+                        </ul>
+                    </nav>
+                    {userRole !== 'loggedOut' && (
+                        <div className="p-4 md:p-6 border-t border-[#b3641a]">
+                            <button
+                                onClick={() => handleLoginAs('loggedOut')}
+                                className="flex items-center w-full px-4 py-3 text-lg text-red-300 rounded-md hover:bg-red-700 transition-colors duration-200"
+                            >
+                                <LogOutIcon size={20} className="mr-3" />
+                                Log Out
+                            </button>
+                        </div>
+                    )}
+                </aside>
+
+                {/* Main content */}
+                <div className="flex-1 flex flex-col">
+                    <header className="bg-white shadow p-4 md:p-6 flex items-center justify-between">
+                        <h1 className="text-2xl font-bold text-gray-800">
+                            Welcome, {headerTitle}!
+                        </h1>
+                        <span className={`px-3 py-1 rounded-full text-sm font-semibold ${statusColorClass}`}>
+                            {statusText}
+                        </span>
+                    </header>
+                    <main className="flex-1 p-4 md:p-8 overflow-y-auto">
+                        {message.text && (
+                            <div className={`p-3 mb-4 rounded-md text-sm ${message.type === 'success' ? 'bg-green-100 text-green-700' : message.type === 'error' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+                                {message.text}
+                            </div>
+                        )}
+                        {(() => {
+                            switch (currentPage) {
+                                case 'dashboard':
+                                    return userRole === 'provider' ?
+                                        <ProviderDashboardPage userProfile={userProfile} onNavigate={setCurrentPage} /> :
+                                        <MemberDashboardPage userProfile={userProfile} onNavigate={setCurrentPage} />;;
+                                case 'profile':
+                                    return <ProfilePage />;
+                                case 'problems':
+                                    return <ProblemListPage onNavigate={setCurrentPage} />;
+                                case 'quotes':
+                                    return userRole === 'provider' ? <MyQuotesPage /> : null;
+                                case 'my-requests':
+                                    return userRole === 'member' ? <MyRequestsPage /> : null;
+                                case 'admin-tools':
+                                    return userRole === 'admin' ? <AdminToolsPage onNavigate={setCurrentPage} /> : null;
+                                case 'admin-pricing':
+                                    return userRole === 'admin' ? <AdminPricingPage /> : null; // New admin page
+                                case 'admin-branding': // New page for admin branding
+                                    return userRole === 'admin' ? <AdminBrandingPage /> : null;
+                                case 'settings':
+                                    return userRole !== 'loggedOut' ? <SettingsPage /> : null;
+                                case 'pricing':
+                                    return <PricingPage />;
+                                case 'problem-detail':
+                                    // Problem ID must be passed to this page
+                                    const pathParts = window.location.hash.split('/');
+                                    const problemId = pathParts[pathParts.length - 1];
+                                    const problem = mockProblems.find(p => p.id === problemId);
+                                    return problem ? <ProblemDetailPage problem={problem} onNavigate={setCurrentPage} /> : <p>Problem not found.</p>;
+                                default:
+                                    return userRole === 'provider' ?
+                                        <ProviderDashboardPage userProfile={userProfile} onNavigate={setCurrentPage} /> :
+                                        <MemberDashboardPage userProfile={userProfile} onNavigate={setCurrentPage} />;
+                            }
+                        })()}
+                    </main>
                 </div>
-            )}
-
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">Payment History</h3>
-                <p className="text-gray-600">No payment history to display.</p>
-                {/* In a real app, fetch and display payment records */}
             </div>
-        </div>
+            {showPostProblemModal && (
+                <PostProblemModal
+                    onClose={() => setShowPostProblemModal(false)}
+                    onSave={handlePostProblem}
+                    activeProblemsCount={
+                        mockProblems.filter(p => p.requesterId === userId && p.status === 'open').length
+                    }
+                    isPaidMember={isPaidMember}
+                />
+            )}
+            {showRegisterModal && (
+                <RegistrationPage
+                    onClose={() => setShowRegisterModal(false)}
+                />
+            )}
+            {selectedPlan && (
+                <SignUpFormModal
+                    plan={selectedPlan}
+                    onClose={() => setSelectedPlan(null)}
+                />
+            )}
+        </AppContext.Provider>
     );
 };
 
-// --- Provider Dashboard Pages ---
+// --- Dashboard Components ---
 
-const ProviderDashboardLayout = ({ children, onNavigate, userProfile, handleSignOut }) => {
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-    return (
-        <div className="flex min-h-screen bg-amber-50">
-            {/* Sidebar for larger screens */}
-            <aside className={`w-64 bg-[#1A3A5A] text-white p-6 space-y-6 hidden md:block flex-shrink-0`}>
-                <h2 className="text-2xl font-bold mb-6">Provider Dashboard</h2>
-                <nav>
-                    <ul>
-                        <li className="mb-4"><button onClick={() => onNavigate('providerDashboard')} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><HomeIcon className="mr-3" size={20} /> Dashboard</button></li>
-                        <li className="mb-4"><button onClick={() => onNavigate('providerProfile')} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><UserIcon className="mr-3" size={20} /> Profile</button></li>
-                        <li className="mb-4"><button onClick={() => onNavigate('providerRequests')} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><SearchIcon className="mr-3" size={20} /> View Requests</button></li>
-                        <li className="mb-4"><button onClick={() => onNavigate('providerAssignments')} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><CalendarIcon className="mr-3" size={20} /> My Assignments</button></li>
-                        <li className="mb-4"><button onClick={() => onNavigate('providerEarnings')} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><DollarSignIcon className="mr-3" size={20} /> Earnings</button></li>
-                        <li className="mb-4"><button onClick={() => onNavigate('home')} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><HomeIcon className="mr-3" size={20} /> Back to Home</button></li>
-                        <li className="mb-4"><button onClick={handleSignOut} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><LogOutIcon className="mr-3" size={20} /> Logout</button></li>
-                    </ul>
-                </nav>
-            </aside>
-
-            {/* Mobile Header */}
-            <header className="bg-[#1A3A5A] text-white p-4 flex justify-between items-center md:hidden w-full">
-                <h2 className="text-xl font-bold">Provider Dashboard</h2>
-                <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="text-white focus:outline-none">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path>
-                    </svg>
-                </button>
-            </header>
-
-            {/* Mobile Sidebar */}
-            {isSidebarOpen && (
-                <div className="fixed inset-0 bg-gray-900 bg-opacity-75 z-40 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>
-            )}
-            <aside className={`fixed inset-y-0 left-0 w-64 bg-[#1A3A5A] text-white p-6 space-y-6 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out md:hidden z-50`}>
-                <button onClick={() => setIsSidebarOpen(false)} className="absolute top-4 right-4 text-white text-3xl">&times;</button>
-                <h2 className="text-2xl font-bold mb-6">Provider Menu</h2>
-                <nav>
-                    <ul>
-                        <li className="mb-4"><button onClick={() => { onNavigate('providerDashboard'); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><HomeIcon className="mr-3" size={20} /> Dashboard</button></li>
-                        <li className="mb-4"><button onClick={() => { onNavigate('providerProfile'); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><UserIcon className="mr-3" size={20} /> Profile</button></li>
-                        <li className="mb-4"><button onClick={() => { onNavigate('providerRequests'); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><SearchIcon className="mr-3" size={20} /> View Requests</button></li>
-                        <li className="mb-4"><button onClick={() => { onNavigate('providerAssignments'); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><CalendarIcon className="mr-3" size={20} /> My Assignments</button></li>
-                        <li className="mb-4"><button onClick={() => { onNavigate('providerEarnings'); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><DollarSignIcon className="mr-3" size={20} /> Earnings</button></li>
-                        <li className="mb-4"><button onClick={() => { onNavigate('home'); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><HomeIcon className="mr-3" size={20} /> Back to Home</button></li>
-                        <li className="mb-4"><button onClick={() => { handleSignOut(); setIsSidebarOpen(false); }} className="flex items-center text-white hover:text-[#FF8A5B] transition duration-200"><LogOutIcon className="mr-3" size={20} /> Logout</button></li>
-                    </ul>
-                </nav>
-            </aside>
-
-            {/* Main content */}
-            <div className="flex-1 flex flex-col">
-                <header className="bg-white shadow p-4 md:p-6 flex items-center justify-between">
-                    <h1 className="text-2xl font-bold text-gray-800">
-                        Welcome, {userProfile?.name || 'Provider'}!
-                    </h1>
-                    <span className={`px-3 py-1 rounded-full text-sm font-semibold ${userProfile?.isProviderApproved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                        {userProfile?.isProviderApproved ? 'Approved Provider' : 'Pending Approval'}
-                    </span>
-                </header>
-                <main className="flex-1 p-4 md:p-8 overflow-y-auto">
-                    {children}
-                </main>
-            </div>
-        </div>
-    );
-};
-
+// ProviderDashboardPage
 const ProviderDashboardPage = ({ userProfile, onNavigate }) => {
+    const { userId, mockProblems } = useContext(AppContext);
+    const [totalQuotes, setTotalQuotes] = useState(0);
+    const [pendingQuotes, setPendingQuotes] = useState(0);
+
+    useEffect(() => {
+        // Calculate quotes based on mockProblems
+        let providerQuotes = [];
+        mockProblems.forEach(problem => {
+            problem.quotes.forEach(quote => {
+                if (quote.providerId === userId) {
+                    providerQuotes.push({ ...quote, problemTitle: problem.title }); // Include problem title for context
+                }
+            });
+        });
+        setTotalQuotes(providerQuotes.length);
+        setPendingQuotes(providerQuotes.filter(quote => quote.status === 'pending').length);
+    }, [mockProblems, userId]); // Recalculate if mockProblems change
+
+    // Sort quotes by creation date, newest first for display in dashboard
+    const sortedMyQuotes = [...mockProblems.flatMap(problem =>
+        problem.quotes.filter(quote => quote.providerId === userId)
+            .map(quote => ({ ...quote, problemTitle: problem.title, problemStatus: problem.status }))
+    )].sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+
     return (
         <div className="space-y-8">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">Dashboard Overview</h2>
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">Provider Dashboard Overview</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {/* Provider Status Card */}
                 <div className="bg-white p-6 rounded-lg shadow-md flex items-center space-x-4">
-                    <BriefcaseIcon className="text-[#1A3A5A]" size={36} />
+                    <BriefcaseIcon className="text-[#964b00]" size={36} />
                     <div>
                         <h3 className="text-lg font-semibold text-gray-700">Provider Status</h3>
                         <p className={`text-xl font-bold ${userProfile?.isProviderApproved ? 'text-green-600' : 'text-red-600'}`}>
@@ -1776,645 +737,2575 @@ const ProviderDashboardPage = ({ userProfile, onNavigate }) => {
                     </div>
                 </div>
 
-                {/* Quick Actions */}
-                <div className="bg-white p-6 rounded-lg shadow-md">
-                    <h3 className="text-lg font-semibold text-gray-700 mb-4">Quick Actions</h3>
-                    <div className="space-y-2">
-                        <button onClick={() => onNavigate('providerRequests')} className="w-full text-left flex items-center px-4 py-2 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 transition"><SearchIcon className="mr-2" size={20} /> View new requests</button>
-                        <button onClick={() => onNavigate('providerAssignments')} className="w-full text-left flex items-center px-4 py-2 bg-green-100 text-green-800 rounded-md hover:bg-green-200 transition"><CalendarIcon className="mr-2" size={20} /> My current assignments</button>
+                {/* Total Quotes Submitted */}
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center space-x-4">
+                    <PackageIcon className="text-[#964b00]" size={36} />
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-700">Quotes Submitted</h3>
+                        <p className="text-xl font-bold text-[#964b00]">
+                            {totalQuotes}
+                        </p>
+                        <p className="text-sm text-gray-500 mt-1">{pendingQuotes} pending review</p>
+                        <button
+                            onClick={() => onNavigate('quotes')}
+                            className="text-sm text-blue-500 hover:underline mt-1"
+                        >
+                            View My Quotes
+                        </button>
                     </div>
                 </div>
 
-                {/* Announcements/Tips */}
+                {/* Quick Actions */}
                 <div className="bg-white p-6 rounded-lg shadow-md">
-                    <h3 className="text-lg font-semibold text-gray-700 mb-4">Provider Tips</h3>
-                    <ul className="text-sm text-gray-600 space-y-2">
-                        <li className="flex items-start"><InfoIcon size={16} className="mr-2 mt-1 text-blue-500 flex-shrink-0" /> Keep your profile updated for better request matching!</li>
-                        <li className="flex items-start"><InfoIcon size={16} className="mr-2 mt-1 text-blue-500 flex-shrink-0" /> Timely service completion boosts your rating.</li>
-                    </ul>
+                    <h3 className="text-lg font-semibold text-gray-700 mb-4">Quick Actions</h3>
+                    <div className="space-y-3">
+                        <button
+                            onClick={() => onNavigate('problems')}
+                            className="flex items-center w-full px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 shadow-md"
+                        >
+                            <FileTextIcon size={20} className="mr-2" />
+                            View Problem List
+                        </button>
+                        <button
+                            onClick={() => onNavigate('profile')}
+                            className="flex items-center w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors duration-200 shadow-md"
+                        >
+                            <UserIcon size={20} className="mr-2" />
+                            Update Profile
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            {/* Recent Assignments (Placeholder) */}
-            <div className="bg-white p-6 rounded-lg shadow-md mt-8">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">Your Recent Assignments</h3>
-                <p className="text-gray-600">No recent assignments to display.</p>
-                <button onClick={() => onNavigate('providerAssignments')} className="mt-4 bg-[#1A3A5A] hover:bg-[#3E618A] text-white font-bold py-2 px-4 rounded-lg transition duration-300">View All Assignments</button>
+            {/* Recently Submitted Quotes (can be expanded) */}
+            <div className="bg-white p-6 rounded-lg shadow-md">
+                <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+                    <PackageIcon size={24} className="mr-2 text-[#964b00]" /> My Recent Quotes
+                </h3>
+                {totalQuotes === 0 ? (
+                    <p className="text-gray-600">No recent quotes found.</p>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full bg-white rounded-lg">
+                            <thead>
+                                <tr className="bg-gray-100 text-gray-600 uppercase text-xs leading-normal">
+                                    <th className="py-2 px-4 text-left">Problem</th>
+                                    <th className="py-2 px-4 text-left">Amount</th>
+                                    <th className="py-2 px-4 text-left">Status</th>
+                                    <th className="py-2 px-4 text-left">Date</th>
+                                </tr>
+                            </thead>
+                            <tbody className="text-gray-600 text-sm font-light">
+                                {sortedMyQuotes.slice(0, 3).map(quote => ( // Show top 3 recent quotes
+                                    <tr key={quote.id} className="border-b border-gray-100">
+                                        <td className="py-2 px-4">{quote.problemTitle}</td>
+                                        <td className="py-2 px-4">R{quote.amount?.toFixed(2)}</td>
+                                        <td className="py-2 px-4">
+                                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                                quote.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                                                'bg-yellow-100 text-yellow-800'
+                                            }`}>
+                                                {quote.status}
+                                            </span>
+                                        </td>
+                                        <td className="py-2 px-4">{quote.createdAt?.toLocaleDateString()}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+                <button
+                    onClick={() => onNavigate('quotes')}
+                    className="mt-4 px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+                >
+                    Go to My Quotes
+                </button>
             </div>
         </div>
     );
 };
 
-const ProviderProfilePage = ({ userProfile, userId, setShowModal, setModalContent }) => {
-    const [editing, setEditing] = useState(false);
-    const [name, setName] = useState(userProfile?.name || '');
-    const [contact, setContact] = useState(userProfile?.contact || '');
-    const [serviceDescription, setServiceDescription] = useState(userProfile?.serviceDescription || '');
-    const [loading, setLoading] = useState(false);
+// MemberDashboardPage
+const MemberDashboardPage = ({ userProfile, onNavigate }) => {
+    const { isPaidMember, userId, mockProblems, setShowPostProblemModal, userRole, handleRegister, setMessage } = useContext(AppContext);
+    const [myProblemsCount, setMyProblemsCount] = useState(0);
+    const [quotesReceivedCount, setQuotesReceivedCount] = useState(0);
+    const [recentQuotes, setRecentQuotes] = useState([]);
+    const [showBecomeProviderModal, setShowBecomeProviderModal] = useState(false);
+
+
+    useEffect(() => {
+        let memberProblems = mockProblems.filter(p => p.requesterId === userId);
+        setMyProblemsCount(memberProblems.length);
+
+        let totalQuotesForMyProblems = 0;
+        let collectedRecentQuotes = [];
+        memberProblems.forEach(problem => {
+            problem.quotes.forEach(quote => {
+                collectedRecentQuotes.push({
+                    ...quote,
+                    problemTitle: problem.title,
+                    problemStatus: problem.status,
+                    problemId: problem.id
+                });
+            });
+        });
+        setQuotesReceivedCount(totalQuotesForMyProblems);
+        setRecentQuotes(collectedRecentQuotes.sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime()));
+    }, [mockProblems, userId]);
+
+    return (
+        <div className="space-y-8">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">Member Dashboard Overview</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* Membership Status Card */}
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center space-x-4">
+                    <UserIcon className="text-[#964b00]" size={36} />
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-700">Membership Status</h3>
+                        <p className={`text-xl font-bold ${isPaidMember ? 'text-blue-600' : 'text-yellow-600'}`}>
+                            {isPaidMember ? 'Paid Member' : 'Free Member'}
+                        </p>
+                        {!isPaidMember && (
+                            <p className="text-sm text-gray-500 mt-1">Unlock full features by upgrading.</p>
+                        )}
+                    </div>
+                </div>
+
+                {/* My Problems Card */}
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center space-x-4">
+                    <FileTextIcon className="text-[#964b00]" size={36} />
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-700">My Posted Problems</h3>
+                        <p className="text-xl font-bold text-[#964b00]">
+                            {myProblemsCount}
+                        </p>
+                        <p className="text-sm text-gray-500 mt-1">{quotesReceivedCount} quotes received</p>
+                        <button
+                            onClick={() => onNavigate('my-requests')}
+                            className="text-sm text-blue-500 hover:underline mt-1"
+                        >
+                            View My Requests
+                        </button>
+                    </div>
+                </div>
+
+                {/* Quick Actions */}
+                <div className="bg-white p-6 rounded-lg shadow-md">
+                    <h3 className="text-lg font-semibold text-gray-700 mb-4">Quick Actions</h3>
+                    <div className="space-y-3">
+                        <button
+                            onClick={() => onNavigate('problems')}
+                            className="flex items-center w-full px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 shadow-md"
+                        >
+                            <FileTextIcon size={20} className="mr-2" />
+                            View Public Problems
+                        </button>
+                        {userProfile.role === 'member' && ( // Ensure only members see this
+                            <button
+                                onClick={() => setShowPostProblemModal(true)} // Directly opens the modal
+                                className="flex items-center w-full px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200 shadow-md"
+                            >
+                                <PlusCircleIcon size={20} className="mr-2" />
+                                Post New Problem
+                            </button>
+                        )}
+                        {!isPaidMember && userProfile.role === 'member' && (
+                             <button
+                                onClick={() => onNavigate('pricing')}
+                                className="flex items-center w-full px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 shadow-md"
+                            >
+                                <DollarSignIcon size={20} className="mr-2" />
+                                Become a Paid Member
+                            </button>
+                        )}
+                        {userProfile.role === 'member' && !userProfile.isProviderApproved && ( // Members not yet approved as providers
+                             <button
+                                onClick={() => setShowBecomeProviderModal(true)}
+                                className="flex items-center w-full px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 transition-colors duration-200 shadow-md"
+                            >
+                                <BriefcaseIcon size={20} className="mr-2" />
+                                Register as a Provider
+                            </button>
+                        )}
+                        <button
+                            onClick={() => onNavigate('profile')}
+                            className="flex items-center w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors duration-200 shadow-md"
+                        >
+                            <UserIcon size={20} className="mr-2" />
+                            Update Profile
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Recent Quotes Received (can be expanded) */}
+            <div className="bg-white p-6 rounded-lg shadow-md">
+                <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+                    <PackageIcon size={24} className="mr-2 text-[#964b00]" /> Recent Quotes on My Problems
+                </h3>
+                {quotesReceivedCount === 0 || userProfile.role === 'loggedOut' ? ( // Check for logged out as well
+                    <p className="text-gray-600">No recent quotes received for your problems.</p>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full bg-white rounded-lg">
+                            <thead>
+                                <tr className="bg-gray-100 text-gray-600 uppercase text-xs leading-normal">
+                                    <th className="py-2 px-4 text-left">Problem</th>
+                                    <th className="py-2 px-4 text-left">Provider</th>
+                                    <th className="py-2 px-4 text-left">Amount</th>
+                                    <th className="py-2 px-4 text-left">Status</th>
+                                    <th className="py-2 px-4 text-left">Date</th>
+                                </tr>
+                            </thead>
+                            <tbody className="text-gray-600 text-sm font-light">
+                                {recentQuotes.slice(0, 3).map(quote => ( // Show top 3 recent quotes
+                                    <tr key={quote.id} className="border-b border-gray-100">
+                                        <td className="py-2 px-4">{quote.problemTitle}</td>
+                                        <td className="py-2 px-4">{quote.providerName}</td>
+                                        <td className="py-2 px-4">R{quote.amount?.toFixed(2)}</td>
+                                        <td className="py-2 px-4">
+                                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                                quote.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                                                'bg-yellow-100 text-yellow-800'
+                                            }`}>
+                                                {quote.status}
+                                            </span>
+                                        </td>
+                                        <td className="py-2 px-4">{quote.createdAt?.toLocaleDateString()}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+                <button
+                    onClick={() => onNavigate('my-requests')}
+                    className="mt-4 px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+                >
+                    Go to My Requests
+                </button>
+            </div>
+            {showBecomeProviderModal && (
+                <BecomeProviderModal
+                    onClose={() => setShowBecomeProviderModal(false)}
+                    onRegister={handleRegister}
+                />
+            )}
+        </div>
+    );
+};
+
+// --- General Pages ---
+
+// RegistrationPage for new users
+const RegistrationPage = ({ onClose }) => {
+    const { handleRegister, setMessage } = useContext(AppContext);
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [phone, setPhone] = useState('');
+    const [address, setAddress] = useState('');
+    const [role, setRole] = useState('member'); // Default to member
+    const [formError, setFormError] = useState('');
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        setFormError('');
+
+        if (!name || !email || !password || !role) {
+            setFormError('Name, Email, Password, and Role are required.');
+            return;
+        }
+
+        // Basic email validation
+        if (!/\S+@\S+\.\S+/.test(email)) {
+            setFormError('Please enter a valid email address.');
+            return;
+        }
+
+        // Basic password strength (e.g., min 6 chars)
+        if (password.length < 6) {
+            setFormError('Password must be at least 6 characters long.');
+            return;
+        }
+
+        handleRegister({ name, email, password, phone, address }, role, false); // isPaid defaults to false
+        setMessage({type: 'success', text: `Registration successful! Welcome, ${name}.`});
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+                <h3 className="text-2xl font-bold text-gray-800 mb-6">Register a New Account</h3>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regName">
+                            Full Name
+                        </label>
+                        <input
+                            type="text"
+                            id="regName"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regEmail">
+                            Email
+                        </label>
+                        <input
+                            type="email"
+                            id="regEmail"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regPassword">
+                            Password
+                        </label>
+                        <input
+                            type="password"
+                            id="regPassword"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regPhone">
+                            Phone (Optional)
+                        </label>
+                        <input
+                            type="tel"
+                            id="regPhone"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regAddress">
+                            Address (Optional)
+                        </label>
+                        <textarea
+                            id="regAddress"
+                            rows="2"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={address}
+                            onChange={(e) => setAddress(e.target.value)}
+                        ></textarea>
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regRole">
+                            Register as:
+                        </label>
+                        <select
+                            id="regRole"
+                            className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={role}
+                            onChange={(e) => setRole(e.target.value)}
+                            required
+                        >
+                            <option value="member">Member</option>
+                            <option value="provider">Provider</option>
+                        </select>
+                    </div>
+
+                    {formError && (
+                        <p className="text-red-500 text-sm">{formError}</p>
+                    )}
+
+                    <div className="flex justify-end space-x-4 mt-6">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
+                        >
+                            Register
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
+// BecomeProviderModal for existing members
+const BecomeProviderModal = ({ onClose }) => {
+    const { userProfile, handleRegister, setMessage } = useContext(AppContext);
+    const [companyName, setCompanyName] = useState('');
+    const [specialties, setSpecialties] = useState('');
+    const [bio, setBio] = useState('');
+    const [formError, setFormError] = useState('');
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        setFormError('');
+
+        if (!companyName || !specialties) {
+            setFormError('Company Name and Specialties are required.');
+            return;
+        }
+
+        // Use existing user profile data and update role/provider-specific fields
+        const updatedUserData = {
+            ...userProfile,
+            companyName,
+            specialties,
+            bio: bio || userProfile.bio, // Allow updating bio, or keep existing
+        };
+
+        handleRegister(updatedUserData, 'provider', userProfile.isPaidMember); // Pass existing paid status
+        setMessage({type: 'success', text: `You are now registered as a Provider! Awaiting admin approval.`});
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+                <h3 className="text-2xl font-bold text-gray-800 mb-6">Register as a Provider</h3>
+                <p className="text-gray-700 mb-4">Your current member details will be used. Please provide additional provider-specific information.</p>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="companyName">
+                            Company Name
+                        </label>
+                        <input
+                            type="text"
+                            id="companyName"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={companyName}
+                            onChange={(e) => setCompanyName(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="specialties">
+                            Specialties (e.g., Plumbing, Electrical)
+                        </label>
+                        <input
+                            type="text"
+                            id="specialties"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={specialties}
+                            onChange={(e) => setSpecialties(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="providerBio">
+                            Provider Bio (Optional)
+                        </label>
+                        <textarea
+                            id="providerBio"
+                            rows="3"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={bio}
+                            onChange={(e) => setBio(e.target.value)}
+                        ></textarea>
+                    </div>
+
+                    {formError && (
+                        <p className="text-red-500 text-sm">{formError}</p>
+                    )}
+
+                    <div className="flex justify-end space-x-4 mt-6">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            className="px-6 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors duration-200"
+                        >
+                            Submit for Approval
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
+// Pricing Page
+const PricingPage = () => {
+    const { setSelectedPlan, setMessage, mockPricingPlans } = useContext(AppContext); // Use context for pricing plans
+
+    const handleSelectPlan = (plan) => {
+        setSelectedPlan(plan);
+        setMessage({type: 'info', text: `You've selected the ${plan.name} plan. Please complete the sign-up.`});
+    };
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-8 text-center">Membership Plans</h2>
+            <p className="text-center text-gray-600 mb-8">Choose the plan that best suits your needs.</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {mockPricingPlans.map(plan => ( // Use mockPricingPlans from context
+                    <div key={plan.id} className="border border-gray-200 rounded-lg p-6 flex flex-col items-center text-center shadow-md hover:shadow-lg transition-shadow duration-300">
+                        <h3 className="text-2xl font-bold text-[#964b00] mb-2">{plan.name}</h3>
+                        <p className="text-4xl font-extrabold text-gray-900 mb-4">{plan.price}</p>
+                        <ul className="text-gray-700 space-y-2 mb-6 text-left w-full">
+                            {plan.features.map((feature, index) => (
+                                <li key={index} className="flex items-center">
+                                    <CheckCircle2Icon size={18} className="text-green-500 mr-2" />
+                                    {feature}
+                                </li>
+                            ))}
+                        </ul>
+                        <button
+                            onClick={() => handleSelectPlan(plan)}
+                            className="mt-auto px-6 py-2 bg-[#964b00] text-white font-semibold rounded-md hover:bg-[#b3641a] transition-colors duration-200 shadow-lg"
+                        >
+                            Select Plan
+                        </button>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+// SignUpFormModal (Appears after selecting a plan)
+const SignUpFormModal = ({ plan, onClose }) => {
+    const { handleBecomePaidMember } = useContext(AppContext);
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [phone, setPhone] = useState('');
+    const [address, setAddress] = useState('');
+    const [formError, setFormError] = useState('');
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        setFormError('');
+
+        if (!name || !email || !password) {
+            setFormError('Name, Email, and Password are required.');
+            return;
+        }
+        if (!/\S+@\S+\.\S+/.test(email)) {
+            setFormError('Please enter a valid email address.');
+            return;
+        }
+        if (password.length < 6) {
+            setFormError('Password must be at least 6 characters long.');
+            return;
+        }
+
+        // Simulate redirection to Paystack using the planCode
+        // In a real app, this would involve an API call to Paystack to initialize a transaction
+        // using the planCode, and then redirecting the user to Paystack's payment page.
+        // For this demo, we'll construct a mock Paystack link with the planCode.
+        const paystackPaymentLink = `https://paystack.com/pay/${plan.planCode || 'default_plan_code'}`; // Use plan.planCode
+        window.open(paystackPaymentLink, '_blank');
+
+        // After redirection, the user would complete payment.
+        // For this demo, we immediately simulate success after opening Paystack link.
+        // In a real app, this would be handled by a Paystack webhook or callback.
+        handleBecomePaidMember({ name, email, password, phone, address }, plan);
+        onClose(); // Close the modal
+    };
+
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+                <h3 className="text-2xl font-bold text-gray-800 mb-6">Sign Up for {plan.name} Plan</h3>
+                <p className="text-gray-700 mb-4">Complete your details to proceed to payment.</p>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupName">
+                            Full Name
+                        </label>
+                        <input
+                            type="text"
+                            id="signupName"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupEmail">
+                            Email
+                        </label>
+                        <input
+                            type="email"
+                            id="signupEmail"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupPassword">
+                            Password
+                        </label>
+                        <input
+                            type="password"
+                            id="signupPassword"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            required
+                        />
+                    </div>
+                     <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupPhone">
+                            Phone (Optional)
+                        </label>
+                        <input
+                            type="tel"
+                            id="signupPhone"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupAddress">
+                            Address (Optional)
+                        </label>
+                        <textarea
+                            id="signupAddress"
+                            rows="2"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={address}
+                            onChange={(e) => setAddress(e.target.value)}
+                        ></textarea>
+                    </div>
+
+                    {formError && (
+                        <p className="text-red-500 text-sm">{formError}</p>
+                    )}
+
+                    <div className="flex flex-col space-y-3 mt-6">
+                        <button
+                            type="submit"
+                            className="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
+                        >
+                            Proceed to Payment ({plan.price})
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                handleBecomePaidMember({ name, email, password, phone, address }, plan);
+                                onClose();
+                            }}
+                            className="px-6 py-3 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200"
+                        >
+                            Simulate Payment Success & Continue to App
+                        </button>
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
+// ProfilePage (Shared for Members and Providers)
+const ProfilePage = () => {
+    const { userProfile, setUserProfile, userRole, setMockUserProfiles, setMessage } = useContext(AppContext);
+    const [editMode, setEditMode] = useState(false);
+    const [formData, setFormData] = useState({
+        name: '',
+        email: '',
+        phone: '',
+        bio: '',
+        address: '',
+        companyName: '',
+        specialties: '',
+    });
+    const [saveMessage, setSaveMessage] = useState({ type: '', message: '' });
 
     useEffect(() => {
         if (userProfile) {
-            setName(userProfile.name || '');
-            setContact(userProfile.contact || '');
-            setServiceDescription(userProfile.serviceDescription || '');
+            setFormData({
+                name: userProfile.name || '',
+                email: userProfile.email || '',
+                phone: userProfile.phone || '',
+                bio: userProfile.bio || '',
+                address: userProfile.address || '',
+                companyName: userProfile.companyName || '',
+                specialties: userProfile.specialties || '',
+            });
         }
     }, [userProfile]);
 
-    const handleSave = async () => {
-        setLoading(true);
-        try {
-            const userDocRef = doc(db, `artifacts/${appId}/users/${userId}/profile/doc`);
-            await updateDoc(userDocRef, {
-                name,
-                contact,
-                serviceDescription,
-                lastUpdated: serverTimestamp()
-            });
-            setShowModal(true);
-            setModalContent({ title: "Profile Updated", message: "Your provider profile has been successfully updated." });
-            setEditing(false);
-        } catch (error) {
-            console.error("Error updating provider profile:", error);
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "Failed to update profile. Please try again." });
-        } finally {
-            setLoading(false);
-        }
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSave = () => {
+        const updatedProfile = { ...userProfile, ...formData };
+        setUserProfile(updatedProfile); // Update local state immediately
+        setMockUserProfiles(prev => ({ // Update global mock profiles
+            ...prev,
+            [userProfile.uid]: updatedProfile
+        }));
+        setEditMode(false);
+        setMessage({ type: 'success', message: 'Profile updated successfully!' });
     };
 
     return (
-        <div className="bg-white p-8 rounded-lg shadow-md max-w-2xl mx-auto">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">My Provider Profile</h2>
-            {loading && <LoadingSpinner />}
-            <div className="space-y-4">
-                <div>
-                    <label className="block text-sm font-medium text-gray-700">Name / Business Name</label>
-                    {editing ? (
-                        <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
-                    ) : (
-                        <p className="mt-1 text-lg text-gray-900">{userProfile?.name || 'N/A'}</p>
-                    )}
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700">Email</label>
-                    <p className="mt-1 text-lg text-gray-900">{userProfile?.email || 'N/A'}</p>
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700">Contact Number</label>
-                    {editing ? (
-                        <input type="text" value={contact} onChange={(e) => setContact(e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
-                    ) : (
-                        <p className="mt-1 text-lg text-gray-900">{userProfile?.contact || 'N/A'}</p>
-                    )}
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700">Services Offered</label>
-                    {editing ? (
-                        <textarea rows="3" value={serviceDescription} onChange={(e) => setServiceDescription(e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"></textarea>
-                    ) : (
-                        <p className="mt-1 text-lg text-gray-900">{userProfile?.serviceDescription || 'N/A'}</p>
-                    )}
-                </div>
-                <div className="pt-4 flex justify-end space-x-3">
-                    {editing ? (
-                        <>
-                            <button onClick={() => setEditing(false)} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition" disabled={loading}>Cancel</button>
-                            <button onClick={handleSave} className="px-4 py-2 bg-[#1A3A5A] text-white rounded-lg hover:bg-[#3E618A] transition" disabled={loading}>Save Changes</button>
-                        </>
-                    ) : (
-                        <button onClick={() => setEditing(true)} className="px-4 py-2 bg-[#1A3A5A] text-white rounded-lg hover:bg-[#3E618A] transition">Edit Profile</button>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const ProviderRequestsPage = ({ userId, userProfile, setShowModal, setModalContent }) => {
-    const [availableRequests, setAvailableRequests] = useState([]);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        // Only fetch requests if the provider is approved
-        if (!userProfile?.isProviderApproved) {
-            setLoading(false);
-            setAvailableRequests([]);
-            return;
-        }
-
-        // Query for requests that are 'pending' and not yet assigned to any provider
-        const q = query(
-            collection(db, `artifacts/${appId}/serviceRequests`),
-            where("status", "==", "pending"),
-            where("providerId", "==", null) // Ensure it's not assigned
-        );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const fetchedRequests = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                createdAt: doc.data().createdAt?.toDate().toLocaleString()
-            }));
-            // Sort by creation date (most recent first)
-            fetchedRequests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            setAvailableRequests(fetchedRequests);
-            setLoading(false);
-        }, (error) => {
-            console.error("Error fetching available requests:", error);
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "Failed to load available requests." });
-            setLoading(false);
-        });
-
-        return () => unsubscribe();
-    }, [userId, userProfile, setShowModal, setModalContent]);
-
-    const handleAssignToSelf = async (requestId, memberName) => {
-        if (!userId || !userProfile?.isProviderApproved) {
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "You are not authorized to take this request." });
-            return;
-        }
-
-        setLoading(true);
-        try {
-            const requestRef = doc(db, `artifacts/${appId}/serviceRequests`, requestId);
-            await updateDoc(requestRef, {
-                status: 'assigned',
-                providerId: userId,
-                assignedProviderName: userProfile.name || 'Assigned Provider',
-                updatedAt: serverTimestamp()
-            });
-            setShowModal(true);
-            setModalContent({ title: "Success", message: `Problem from ${memberName} assigned to you.` });
-        } catch (error) {
-            console.error("Error assigning request:", error);
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "Failed to assign request. It might have been taken by another provider." });
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    if (!userProfile?.isProviderApproved) {
-        return (
-            <div className="bg-white p-8 rounded-lg shadow-md max-w-2xl mx-auto text-center">
-                <h2 className="text-2xl font-bold text-gray-800 mb-4">Access Denied</h2>
-                <p className="text-gray-600 mb-4">Your provider account is pending approval. You will be able to view and accept requests once approved.</p>
-                <LoadingSpinner message="Awaiting approval..." />
-            </div>
-        );
-    }
-
-    return (
-        <div className="space-y-8">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">Available Service Requests/Problems</h2>
-
-            {loading ? (
-                <LoadingSpinner message="Loading available requests..." />
-            ) : availableRequests.length === 0 ? (
-                <p className="text-gray-600 p-4 bg-white rounded-lg shadow-md">No new service requests available at the moment. Check back later!</p>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {availableRequests.map(request => (
-                        <div key={request.id} className="bg-white p-6 rounded-lg shadow-md border-t-4 border-blue-600">
-                            <h3 className="text-xl font-bold text-gray-800 mb-2">{request.title}</h3>
-                            <p className="text-gray-600 mb-2">{request.description}</p>
-                            <p className="text-sm text-gray-500 mb-1">Category: <span className="font-semibold capitalize">{serviceCategories.find(c => c.id === request.category)?.name || request.category}</span></p>
-                            <p className="text-sm text-gray-500 mb-1">Location: <span className="font-semibold">{request.location || 'N/A'}</span></p>
-                            {request.budget && <p className="text-sm text-gray-500 mb-1">Budget: <span className="font-semibold">R {request.budget}</span></p>}
-                            <p className="text-sm text-gray-500 mb-1">Requested by: <span className="font-semibold">{request.memberName}</span></p>
-                            <p className="text-xs text-gray-400 mb-4">Requested on: {request.createdAt}</p>
-                            <button
-                                onClick={() => handleAssignToSelf(request.id, request.memberName)}
-                                className="bg-[#1A3A5A] hover:bg-[#3E618A] text-white font-bold py-2 px-4 rounded-lg transition duration-300"
-                                disabled={loading}
-                            >
-                                Take This Request
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-};
-
-const ProviderAssignmentsPage = ({ userId, userProfile, setShowModal, setModalContent }) => {
-    const [myAssignments, setMyAssignments] = useState([]);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        if (!userId || !userProfile?.isProviderApproved) {
-            setLoading(false);
-            setMyAssignments([]);
-            return;
-        }
-
-        // Query for requests assigned to the current provider
-        const q = query(
-            collection(db, `artifacts/${appId}/serviceRequests`),
-            where("providerId", "==", userId),
-            where("status", "in", ['assigned', 'pending']) // Include requests that are assigned or still pending, but assigned to me
-        );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const fetchedAssignments = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                createdAt: doc.data().createdAt?.toDate().toLocaleString(),
-                updatedAt: doc.data().updatedAt?.toDate().toLocaleString()
-            }));
-            // Sort by creation date (most recent first)
-            fetchedAssignments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            setMyAssignments(fetchedAssignments);
-            setLoading(false);
-        }, (error) => {
-            console.error("Error fetching assignments:", error);
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "Failed to load assignments." });
-            setLoading(false);
-        });
-
-        return () => unsubscribe();
-    }, [userId, userProfile, setShowModal, setModalContent]);
-
-    const handleCompleteRequest = async (requestId, memberName) => {
-        setLoading(true);
-        try {
-            const requestRef = doc(db, `artifacts/${appId}/serviceRequests`, requestId);
-            await updateDoc(requestRef, {
-                status: 'completed',
-                updatedAt: serverTimestamp()
-            });
-            setShowModal(true);
-            setModalContent({ title: "Request Completed", message: `Service for ${memberName} marked as completed.` });
-        } catch (error) {
-            console.error("Error completing request:", error);
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "Failed to mark request as complete." });
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    if (!userProfile?.isProviderApproved) {
-        return (
-            <div className="bg-white p-8 rounded-lg shadow-md max-w-2xl mx-auto text-center">
-                <h2 className="text-2xl font-bold text-gray-800 mb-4">Access Denied</h2>
-                <p className="text-gray-600 mb-4">Your provider account is pending approval. You will be able to manage assignments once approved.</p>
-                <LoadingSpinner message="Awaiting approval..." />
-            </div>
-        );
-    }
-
-    return (
-        <div className="space-y-8">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">My Current Assignments</h2>
-
-            {loading ? (
-                <LoadingSpinner message="Loading your assignments..." />
-            ) : myAssignments.length === 0 ? (
-                <p className="text-gray-600 p-4 bg-white rounded-lg shadow-md">You have no active assignments.</p>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {myAssignments.map(assignment => (
-                        <div key={assignment.id} className="bg-white p-6 rounded-lg shadow-md border-t-4 border-green-600">
-                            <h3 className="text-xl font-bold text-gray-800 mb-2">{assignment.title}</h3>
-                            <p className="text-gray-600 mb-2">{assignment.description}</p>
-                            <p className="text-sm text-gray-500 mb-1">Category: <span className="font-semibold capitalize">{serviceCategories.find(c => c.id === assignment.category)?.name || assignment.category}</span></p>
-                            <p className="text-sm text-gray-500 mb-1">Location: <span className="font-semibold">{assignment.location || 'N/A'}</span></p>
-                            {assignment.budget && <p className="text-sm text-gray-500 mb-1">Budget: <span className="font-semibold">R {assignment.budget}</span></p>}
-                            <p className="text-sm text-gray-500 mb-1">Member: <span className="font-semibold">{assignment.memberName}</span></p>
-                            <p className="text-sm text-gray-500 mb-1">Status: <span className={`font-semibold capitalize ${assignment.status === 'completed' ? 'text-green-600' : 'text-blue-600'}`}>{assignment.status}</span></p>
-                            <p className="text-xs text-gray-400 mb-4">Assigned on: {assignment.updatedAt}</p>
-                            {assignment.status !== 'completed' && (
-                                <button
-                                    onClick={() => handleCompleteRequest(assignment.id, assignment.memberName)}
-                                    className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300"
-                                    disabled={loading}
-                                >
-                                    Mark as Complete
-                                </button>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-};
-
-const ProviderEarningsPage = ({ userId, userProfile, setShowModal, setModalContent }) => {
-    const [loading, setLoading] = useState(false);
-    const [showPaymentModal, setShowPaymentModal] = useState(false);
-
-    const handlePayProviderFee = async () => {
-        if (userProfile?.isProviderPaid) {
-            setShowModal(true);
-            setModalContent({ title: "Provider Fee Status", message: "Your provider fee is already paid for this period." });
-            return;
-        }
-
-        setLoading(true);
-        setShowPaymentModal(true);
-        // Simulate payment gateway interaction
-        setTimeout(async () => {
-            try {
-                const userDocRef = doc(db, `artifacts/${appId}/users/${userId}/profile/doc`);
-                await updateDoc(userDocRef, {
-                    isProviderPaid: true,
-                    lastProviderPayment: serverTimestamp()
-                });
-                setShowModal(true);
-                setModalContent({ title: "Payment Successful", message: "Thank you! Your provider fee has been paid." });
-            } catch (error) {
-                console.error("Error updating provider payment status:", error);
-                setShowModal(true);
-                setModalContent({ title: "Error", message: "Failed to record payment. Please try again or contact support." });
-            } finally {
-                setLoading(false);
-                setShowPaymentModal(false);
-            }
-        }, 2000);
-    };
-
-    if (!userProfile?.isProviderApproved) {
-        return (
-            <div className="bg-white p-8 rounded-lg shadow-md max-w-2xl mx-auto text-center">
-                <h2 className="text-2xl font-bold text-gray-800 mb-4">Access Denied</h2>
-                <p className="text-gray-600 mb-4">Your provider account is pending approval. Earnings and payments will be accessible once approved.</p>
-                <LoadingSpinner message="Awaiting approval..." />
-            </div>
-        );
-    }
-
-    return (
-        <div className="space-y-8">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">My Earnings & Payments</h2>
-
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">Provider Fee Status</h3>
-                <p className="text-gray-700 text-lg mb-2">Status: <span className={`font-semibold ${userProfile?.isProviderPaid ? 'text-green-600' : 'text-red-600'}`}>
-                    {userProfile?.isProviderPaid ? 'Paid' : 'Outstanding'}
-                </span></p>
-                <p className="text-gray-600 mb-4">Monthly Provider Fee: R100</p>
-                {!userProfile?.isProviderPaid && (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center justify-between">
+                My Profile
+                {!editMode && (
                     <button
-                        onClick={handlePayProviderFee}
-                        className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300"
-                        disabled={loading}
+                        onClick={() => setEditMode(true)}
+                        className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 flex items-center"
                     >
-                        {loading ? <LoadingSpinner message="Processing..." /> : 'Pay Provider Fee'}
+                        <EditIcon size={18} className="mr-2" /> Edit Profile
+                    </button>
+                )}
+            </h2>
+
+            {saveMessage.message && (
+                <div className={`p-3 mb-4 rounded-md text-sm ${saveMessage.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {saveMessage.message}
+                </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Name:</label>
+                        {editMode ? (
+                            <input
+                                type="text"
+                                name="name"
+                                value={formData.name}
+                                onChange={handleChange}
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            />
+                        ) : (
+                            <p className="text-gray-900 text-lg">{userProfile?.name || 'N/A'}</p>
+                        )}
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Email:</label>
+                        {editMode ? (
+                            <input
+                                type="email"
+                                name="email"
+                                value={formData.email}
+                                onChange={handleChange}
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            />
+                        ) : (
+                            <p className="text-gray-900 text-lg">{userProfile?.email || 'N/A'}</p>
+                        )}
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Phone:</label>
+                        {editMode ? (
+                            <input
+                                type="text"
+                                name="phone"
+                                value={formData.phone}
+                                onChange={handleChange}
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            />
+                        ) : (
+                            <p className="text-gray-900 text-lg">{userProfile?.phone || 'N/A'}</p>
+                        )}
+                    </div>
+                </div>
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Address:</label>
+                        {editMode ? (
+                            <textarea
+                                name="address"
+                                value={formData.address}
+                                onChange={handleChange}
+                                rows="3"
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            ></textarea>
+                        ) : (
+                            <p className="text-gray-900 text-lg whitespace-pre-wrap">{userProfile?.address || 'N/A'}</p>
+                        )}
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Bio:</label>
+                        {editMode ? (
+                            <textarea
+                                name="bio"
+                                value={formData.bio}
+                                onChange={handleChange}
+                                rows="5"
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            ></textarea>
+                        ) : (
+                            <p className="text-gray-900 text-lg whitespace-pre-wrap">{userProfile?.bio || 'N/A'}</p>
+                        )}
+                    </div>
+                    {userRole === 'provider' && (
+                        <>
+                            <div>
+                                <label className="block text-gray-700 text-sm font-bold mb-2">Company Name:</label>
+                                {editMode ? (
+                                    <input
+                                        type="text"
+                                        name="companyName"
+                                        value={formData.companyName}
+                                        onChange={handleChange}
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                    />
+                                ) : (
+                                    <p className="text-gray-900 text-lg">{userProfile?.companyName || 'N/A'}</p>
+                                )}
+                            </div>
+                            <div>
+                                <label className="block text-gray-700 text-sm font-bold mb-2">Specialties:</label>
+                                {editMode ? (
+                                    <input
+                                        type="text"
+                                        name="specialties"
+                                        value={formData.specialties}
+                                        onChange={handleChange}
+                                        placeholder="e.g., Plumbing, Electrical, Landscaping"
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                    />
+                                ) : (
+                                    <p className="text-gray-900 text-lg">{userProfile?.specialties || 'N/A'}</p>
+                                )}
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {editMode && (
+                <div className="mt-8 flex justify-end space-x-4">
+                    <button
+                        onClick={() => { setEditMode(false); setMessage({ type: '', message: '' }); }} // Clear message on cancel
+                        className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
+                    >
+                        Save Changes
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+};
+
+// ProblemListPage (Publicly accessible with filters)
+const ProblemListPage = ({ onNavigate }) => {
+    const { userRole, userId, isPaidMember, mockProblems, setMockProblems, mockUserProfiles, setShowPostProblemModal, setMessage } = useContext(AppContext);
+    // Removed local message state, using global one from context now
+
+    // Filter states
+    const [filterCategory, setFilterCategory] = useState('All');
+    const [filterLocation, setFilterLocation] = useState('All');
+    const [minBudget, setMinBudget] = useState('');
+    const [maxBudget, setMaxBudget] = useState('');
+
+    const handleSendQuote = (problemId, quoteData) => {
+        if (userRole !== 'provider') {
+            setMessage({ type: 'error', text: 'Only providers can send quotes.' });
+            return;
+        }
+
+        setMockProblems(prevProblems =>
+            prevProblems.map(problem => {
+                if (problem.id === problemId) {
+                    const newQuote = {
+                        id: crypto.randomUUID(),
+                        providerId: userId,
+                        providerName: quoteData.providerName,
+                        amount: quoteData.amount,
+                        details: quoteData.details,
+                        proposedStartDate: quoteData.proposedStartDate,
+                        proposedEndDate: quoteData.proposedEndDate,
+                        status: 'pending',
+                        createdAt: new Date(),
+                    };
+                    return {
+                        ...problem,
+                        quotes: [...(problem.quotes || []), newQuote]
+                    };
+                }
+                return problem;
+            })
+        );
+        setMessage({ type: 'success', text: 'Quote sent successfully!' });
+    };
+
+    const uniqueCategories = ['All', ...new Set(mockProblems.map(p => p.category))];
+    const uniqueLocations = ['All', ...new Set(mockProblems.map(p => p.location))];
+
+    const filteredProblems = mockProblems.filter(problem => {
+        // Only show approved problems to non-admin users
+        if (userRole !== 'admin' && !problem.isApproved) {
+            return false;
+        }
+
+        // Filter by category
+        if (filterCategory !== 'All' && problem.category !== filterCategory) {
+            return false;
+        }
+        // Filter by location
+        if (filterLocation !== 'All' && problem.location !== filterLocation) {
+            return false;
+        }
+        // Filter by budget
+        const budget = problem.estimatedBudget;
+        if (minBudget && budget < parseFloat(minBudget)) {
+            return false;
+        }
+        if (maxBudget && budget > parseFloat(maxBudget)) {
+            return false;
+        }
+        return true;
+    }).sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime()); // Sort newest first
+
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center justify-between">
+                Public Problem List
+                {userRole === 'member' && ( // Always allow button click for members
+                    <button
+                        onClick={() => setShowPostProblemModal(true)}
+                        className={`px-4 py-2 rounded-md transition-colors duration-200 flex items-center bg-green-600 text-white hover:bg-green-700`}
+                        title={`Post a new problem (Free members limited to 5 active problems)`}
+                    >
+                        <PlusCircleIcon size={18} className="mr-2" /> Post New Problem
+                    </button>
+                )}
+            </h2>
+
+            {/* Message display moved to App.js */}
+
+            {/* Filters Section */}
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 items-end">
+                <div>
+                    <label htmlFor="filterCategory" className="block text-gray-700 text-sm font-bold mb-2">Category</label>
+                    <select
+                        id="filterCategory"
+                        value={filterCategory}
+                        onChange={(e) => setFilterCategory(e.target.value)}
+                        className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    >
+                        {uniqueCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                    </select>
+                </div>
+                <div>
+                    <label htmlFor="filterLocation" className="block text-gray-700 text-sm font-bold mb-2">Location</label>
+                    <select
+                        id="filterLocation"
+                        value={filterLocation}
+                        onChange={(e) => setFilterLocation(e.target.value)}
+                        className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    >
+                        {uniqueLocations.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                    </select>
+                </div>
+                <div>
+                    <label htmlFor="minBudget" className="block text-gray-700 text-sm font-bold mb-2">Min Budget (R)</label>
+                    <input
+                        type="number"
+                        id="minBudget"
+                        value={minBudget}
+                        onChange={(e) => setMinBudget(e.target.value)}
+                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                        placeholder="e.g., 100"
+                    />
+                </div>
+                <div>
+                    <label htmlFor="maxBudget" className="block text-gray-700 text-sm font-bold mb-2">Max Budget (R)</label>
+                    <input
+                        type="number"
+                        id="maxBudget"
+                        value={maxBudget}
+                        onChange={(e) => setMaxBudget(e.target.value)}
+                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                        placeholder="e.g., 1000"
+                    />
+                </div>
+            </div>
+
+
+            {filteredProblems.length === 0 ? (
+                <p className="text-gray-600">No problems found matching your criteria.</p>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredProblems.map(problem => (
+                        <ProblemCard
+                            key={problem.id}
+                            problem={problem}
+                            userRole={userRole}
+                            isPaidMember={isPaidMember}
+                            currentUserId={userId}
+                            onSendQuote={handleSendQuote}
+                            onNavigate={onNavigate} // Pass onNavigate for problem details page
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+// ProblemCard component for ProblemListPage
+const ProblemCard = ({ problem, userRole, isPaidMember, currentUserId, onSendQuote, onNavigate }) => {
+    const { userProfile, mockUserProfiles } = useContext(AppContext);
+    const [hasQuoted, setHasQuoted] = useState(false);
+
+    // Determine if the current provider has quoted this problem
+    useEffect(() => {
+        if (userRole === 'provider' && problem.quotes) {
+            setHasQuoted(problem.quotes.some(quote => quote.providerId === currentUserId));
+        } else {
+            setHasQuoted(false);
+        }
+    }, [problem.quotes, currentUserId, userRole]);
+
+    const handleViewDetails = () => {
+        // Use window.location.hash to simulate routing
+        window.location.hash = `problem-detail/${problem.id}`;
+        onNavigate('problem-detail'); // Update parent state for rendering ProblemDetailPage
+    };
+
+    return (
+        <div className="bg-gray-50 p-4 rounded-lg shadow-sm border border-gray-200">
+            <h3 className="text-xl font-semibold text-gray-800 mb-2">{problem.title}</h3>
+            <p className="text-gray-700 mb-2 text-sm">{problem.description}</p>
+            <p className="text-gray-600 font-medium text-xs">Category: {problem.category || 'General'}</p>
+            <p className="text-gray-600 font-medium text-xs">Location: {problem.location || 'N/A'}</p>
+            <p className="text-gray-600 font-medium text-xs">Budget: R{problem.estimatedBudget?.toFixed(2) || 'N/A'}</p>
+            <p className="text-gray-600 font-medium text-xs">Status: <span className="capitalize">{problem.status}</span></p>
+            <p className="text-gray-500 text-xs mt-1">Posted: {problem.createdAt?.toLocaleDateString()}</p>
+            {!problem.isApproved && userRole !== 'loggedOut' && (
+                <span className="px-2 py-1 text-xs font-semibold bg-red-100 text-red-800 rounded-full mt-2 inline-block">Awaiting Admin Approval</span>
+            )}
+
+            <div className="mt-4 flex flex-col space-y-2">
+                {userRole === 'provider' && problem.isApproved && problem.status === 'open' && (
+                    <button
+                        onClick={handleViewDetails} // Takes to ProblemDetailPage
+                        className="px-3 py-1 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 text-sm flex items-center justify-center"
+                    >
+                        <PackageIcon size={16} className="mr-1" /> View Details & Quote
+                    </button>
+                )}
+                {userRole === 'member' && problem.requesterId === currentUserId && (
+                    <button
+                        onClick={handleViewDetails} // Takes to ProblemDetailPage
+                        className="px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 text-sm flex items-center justify-center"
+                    >
+                        <FileTextIcon size={16} className="mr-1" /> View My Problem
+                    </button>
+                )}
+                {userRole === 'loggedOut' || (userRole === 'member' && problem.requesterId !== currentUserId) && (
+                     <button
+                        onClick={handleViewDetails} // Takes to ProblemDetailPage
+                        className="px-3 py-1 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors duration-200 text-sm flex items-center justify-center"
+                    >
+                        View Problem Details
                     </button>
                 )}
             </div>
+        </div>
+    );
+};
 
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">Total Earnings</h3>
-                <p className="text-gray-700 text-4xl font-bold mb-4">R 0.00</p>
-                <p className="text-gray-600">Earnings will be calculated and displayed here based on completed assignments.</p>
+// ProblemDetailPage - New Page for Problem Details and Quoting
+const ProblemDetailPage = ({ problem, onNavigate }) => {
+    const { userRole, userId, isPaidMember, mockProblems, setMockProblems, userProfile, setMessage } = useContext(AppContext);
+    const [showQuoteForm, setShowQuoteForm] = useState(false);
+    const [showMemberDetailsModal, setShowMemberDetailsModal] = useState(false);
+    const [showProviderDetailsModal, setShowProviderDetailsModal] = useState(false);
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [confirmAction, setConfirmAction] = useState(null);
+    const [confirmMessage, setConfirmMessage] = useState('');
+
+    const hasQuoted = userRole === 'provider' && problem.quotes.some(quote => quote.providerId === userId);
+    const isRequester = userRole === 'member' && problem.requesterId === userId;
+    const isProblemOpen = problem.status === 'open';
+    const hasAcceptedQuote = problem.status === 'closed' && problem.acceptedQuoteId;
+
+    const handleSendQuote = (quoteData) => {
+        if (userRole !== 'provider' || !userProfile.isProviderApproved) {
+            setMessage({ type: 'error', text: 'You must be an approved provider to send quotes.' });
+            return;
+        }
+        if (hasQuoted) {
+            setMessage({ type: 'error', text: 'You have already submitted a quote for this problem.' });
+            return;
+        }
+
+        setMockProblems(prevProblems =>
+            prevProblems.map(p => {
+                if (p.id === problem.id) {
+                    const newQuote = {
+                        id: crypto.randomUUID(),
+                        providerId: userId,
+                        providerName: userProfile.name,
+                        amount: quoteData.proposedBudget,
+                        details: quoteData.motivation,
+                        proposedStartDate: quoteData.proposedStartDate,
+                        proposedEndDate: quoteData.proposedEndDate,
+                        status: 'pending',
+                        createdAt: new Date(),
+                    };
+                    return {
+                        ...p,
+                        quotes: [...(p.quotes || []), newQuote]
+                    };
+                }
+                return p;
+            })
+        );
+        setShowQuoteForm(false);
+        setMessage({ type: 'success', text: 'Quote submitted successfully!' });
+    };
+
+    const handleAcceptQuote = (quoteId, providerId) => {
+        setConfirmMessage("By accepting this quote, your contact information (name, email, phone) will be shared with the selected provider. Do you wish to proceed?");
+        setConfirmAction(() => () => {
+            setMockProblems(prevProblems =>
+                prevProblems.map(p => {
+                    if (p.id === problem.id) {
+                        return {
+                            ...p,
+                            status: 'closed',
+                            acceptedQuoteId: quoteId,
+                            quotes: p.quotes.map(q =>
+                                q.id === quoteId ? { ...q, status: 'accepted' } : q
+                            )
+                        };
+                    }
+                    return p;
+                })
+            );
+            setMessage({ type: 'success', text: 'Quote accepted and problem closed! Provider contact details now available.' });
+            setShowConfirmModal(false);
+        });
+        setMessage({ type: '', text: '' }); // Clear existing message
+        setShowConfirmModal(true);
+    };
+
+
+    const handleMarkProblemResolved = () => {
+        setConfirmMessage("Are you sure you want to mark this problem as resolved? This cannot be undone.");
+        setConfirmAction(() => () => {
+            setMockProblems(prevProblems =>
+                prevProblems.map(p =>
+                    p.id === problem.id ? { ...p, status: 'resolved' } : p
+                )
+            );
+            setMessage({ type: 'success', text: 'Problem marked as resolved!' });
+            setShowConfirmModal(false);
+        });
+        setMessage({ type: '', text: '' }); // Clear existing message
+        setShowConfirmModal(true);
+    };
+
+    const handleDeleteProblem = () => {
+        setConfirmMessage("Are you sure you want to delete this problem and all associated quotes? This action is irreversible.");
+        setConfirmAction(() => () => {
+            setMockProblems(prevProblems => prevProblems.filter(p => p.id !== problem.id));
+            setMessage({ type: 'success', text: 'Problem and all associated quotes deleted successfully!' });
+            onNavigate('problems'); // Redirect after deletion
+            setShowConfirmModal(false);
+        });
+        setMessage({ type: '', text: '' }); // Clear existing message
+        setShowConfirmModal(true);
+    };
+
+    // Determine the accepted provider's ID for the modal
+    const acceptedProviderId = problem.quotes.find(q => q.id === problem.acceptedQuoteId)?.providerId;
+
+    // Check if current user (provider) has the accepted quote
+    const isCurrentProviderAccepted = userRole === 'provider' && acceptedProviderId === userId;
+
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <button
+                onClick={() => onNavigate('problems')}
+                className="mb-4 px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+            >
+                &larr; Back to Problem List
+            </button>
+
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">{problem.title}</h2>
+
+            <div className="space-y-4 mb-8">
+                <p className="text-gray-700 text-lg">{problem.description}</p>
+                <p className="text-gray-600"><span className="font-semibold">Category:</span> {problem.category}</p>
+                <p className="text-gray-600"><span className="font-semibold">Location:</span> {problem.location}</p>
+                <p className="text-gray-600"><span className="font-semibold">Estimated Budget:</span> R{problem.estimatedBudget?.toFixed(2)}</p>
+                <p className="text-gray-600"><span className="font-semibold">Status:</span> <span className="capitalize">{problem.status}</span></p>
+                <p className="text-gray-500 text-sm">Posted on: {problem.createdAt?.toLocaleDateString()}</p>
+                {!problem.isApproved && (userRole === 'admin' || problem.requesterId === userId) && (
+                    <span className="px-3 py-1 text-sm font-semibold bg-red-100 text-red-800 rounded-full inline-block">Awaiting Admin Approval</span>
+                )}
             </div>
 
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">Earning History</h3>
-                <p className="text-gray-600">No earning history to display.</p>
-            </div>
-
-            {showPaymentModal && (
-                <Modal
-                    show={showPaymentModal}
-                    title="Processing Payment"
-                    message="Please wait while we process your provider fee payment. Do not close this window."
-                    onClose={() => {}} // Disable closing during processing
-                    showConfirm={false}
+            {/* Provider Actions/Info */}
+            {userRole === 'provider' && userProfile.isProviderApproved && isProblemOpen && !hasQuoted && (
+                <button
+                    onClick={() => setShowQuoteForm(true)}
+                    className="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 text-lg flex items-center mb-6"
                 >
-                    <LoadingSpinner message="Processing payment..." />
-                </Modal>
+                    <PlusCircleIcon size={20} className="mr-2" /> Submit a Quote
+                </button>
+            )}
+            {userRole === 'provider' && userProfile.isProviderApproved && hasQuoted && (
+                <p className="bg-yellow-100 text-yellow-800 p-3 rounded-md mb-6 font-semibold">
+                    You have already submitted a quote for this problem.
+                </p>
+            )}
+            {userRole === 'provider' && !userProfile.isProviderApproved && (
+                 <p className="bg-red-100 text-red-800 p-3 rounded-md mb-6 font-semibold">
+                    Your provider registration is pending approval. You cannot submit quotes yet.
+                </p>
+            )}
+            {userRole === 'provider' && problem.status === 'closed' && !isCurrentProviderAccepted && (
+                 <p className="bg-gray-100 text-gray-800 p-3 rounded-md mb-6 font-semibold">
+                    This problem has been closed and your quote was not accepted.
+                </p>
+            )}
+             {userRole === 'provider' && isCurrentProviderAccepted && (
+                 <p className="bg-green-100 text-green-800 p-3 rounded-md mb-6 font-semibold">
+                    Congratulations! Your quote for this problem was accepted.
+                </p>
+            )}
+
+
+            {/* Requester (Member) View - Quotes Management */}
+            {isRequester && (
+                <div className="mt-8">
+                    <h3 className="text-2xl font-bold text-gray-800 mb-4">Quotes Received ({problem.quotes.length})</h3>
+                    {!isPaidMember && problem.quotes.length > 0 && (
+                        <p className="bg-red-100 text-red-800 p-3 rounded-md mb-4 font-semibold">
+                            Upgrade to **paid membership** to view and manage these quotes.
+                        </p>
+                    )}
+                    {problem.quotes.length === 0 ? (
+                        <p className="text-gray-600">No quotes received for this problem yet.</p>
+                    ) : (
+                        <div className="space-y-4">
+                            {problem.quotes.map(quote => (
+                                <div key={quote.id} className="border border-gray-200 rounded-lg p-4 bg-gray-50 shadow-sm">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <h4 className="text-lg font-semibold text-gray-800">
+                                            Quote by: {isPaidMember || quote.status === 'accepted' ? quote.providerName : 'Confidential'}
+                                        </h4>
+                                        <span className={`px-2 py-1 rounded-full text-xs font-semibold capitalize ${
+                                            quote.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                                            'bg-yellow-100 text-yellow-800'
+                                        }`}>
+                                            {quote.status}
+                                        </span>
+                                    </div>
+                                    <p className="text-gray-700 mb-1">Proposed Budget: <span className="font-bold">R{isPaidMember || quote.status === 'accepted' ? quote.amount?.toFixed(2) : '---'}</span></p>
+                                    <p className="text-gray-700 mb-1">Proposed Dates: {isPaidMember || quote.status === 'accepted' ? `${quote.proposedStartDate} to ${quote.proposedEndDate}` : '---'}</p>
+                                    <p className="text-gray-600 text-sm">Motivation: {isPaidMember || quote.status === 'accepted' ? quote.details : '---'}</p>
+                                    <p className="text-gray-500 text-xs mt-2">Quoted: {quote.createdAt?.toLocaleString()}</p>
+
+                                    {isPaidMember && isProblemOpen && quote.status === 'pending' && (
+                                        <div className="mt-4 flex justify-end">
+                                            <button
+                                                onClick={() => handleAcceptQuote(quote.id, quote.providerId)}
+                                                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 text-sm"
+                                            >
+                                                Accept Quote
+                                            </button>
+                                        </div>
+                                    )}
+                                    {hasAcceptedQuote && quote.status === 'accepted' && (
+                                        <p className="mt-4 text-green-600 font-bold text-sm">This quote has been accepted!</p>
+                                    )}
+                                     {hasAcceptedQuote && quote.status === 'pending' && (
+                                        <p className="mt-4 text-gray-600 font-bold text-sm">Another quote was accepted for this problem.</p>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {problem.status === 'closed' && hasAcceptedQuote && (
+                        <div className="mt-6 p-4 bg-blue-50 rounded-md border border-blue-200">
+                            <h4 className="font-bold text-blue-800 mb-2">Accepted Quote Details:</h4>
+                            <p>Provider: {problem.quotes.find(q => q.id === problem.acceptedQuoteId)?.providerName}</p>
+                            <p>Amount: R{problem.quotes.find(q => q.id === problem.acceptedQuoteId)?.amount?.toFixed(2)}</p>
+                            <button
+                                onClick={() => setShowProviderDetailsModal(true)}
+                                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 text-sm flex items-center"
+                            >
+                                <UserIcon size={18} className="mr-2" /> View Provider Contact Details
+                            </button>
+                        </div>
+                    )}
+                     {problem.status === 'closed' && hasAcceptedQuote && (
+                        <button
+                            onClick={handleMarkProblemResolved}
+                            className="mt-6 px-6 py-3 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200 text-lg flex items-center"
+                        >
+                            <CheckCircleIcon size={20} className="mr-2" /> Mark as Resolved
+                        </button>
+                    )}
+                    {isProblemOpen && (
+                        <button
+                            onClick={handleDeleteProblem}
+                            className="mt-6 px-6 py-3 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 text-lg flex items-center"
+                        >
+                            <XCircleIcon size={20} className="mr-2" /> Delete Problem
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {showQuoteForm && (
+                <QuoteModal
+                    onClose={() => setShowQuoteForm(false)}
+                    onSubmit={handleSendQuote}
+                    problemTitle={problem.title}
+                />
+            )}
+            {showMemberDetailsModal && (
+                <MemberDetailsModal
+                    onClose={() => setShowMemberDetailsModal(false)}
+                    memberId={problem.requesterId}
+                />
+            )}
+            {showProviderDetailsModal && acceptedProviderId && (
+                <ProviderDetailsModal
+                    onClose={() => setShowProviderDetailsModal(false)}
+                    providerId={acceptedProviderId}
+                />
+            )}
+            {showConfirmModal && (
+                <ConfirmationModal
+                    message={confirmMessage}
+                    onConfirm={confirmAction}
+                    onCancel={() => setShowConfirmModal(false)}
+                />
             )}
         </div>
     );
 };
 
 
-// Main App Component
-const App = () => {
-    const [currentPage, setCurrentPage] = useState('home');
-    const [currentUser, setCurrentUser] = useState(null);
-    const [userProfile, setUserProfile] = useState(null);
-    const [loadingAuth, setLoadingAuth] = useState(true);
-    const [showModal, setShowModal] = useState(false);
-    const [modalContent, setModalContent] = useState({ title: '', message: '' });
+// PostProblemModal component (for members to post problems)
+const PostProblemModal = ({ onClose, onSave, activeProblemsCount, isPaidMember }) => {
+    const [title, setTitle] = useState('');
+    const [description, setDescription] = useState('');
+    const [category, setCategory] = useState('');
+    const [location, setLocation] = useState('');
+    const [estimatedBudget, setEstimatedBudget] = useState('');
+    const [formError, setFormError] = useState('');
 
-    // Firebase Auth State Listener & Custom Token Sign-in
+    const MAX_FREE_PROBLEMS = 5;
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        setFormError('');
+
+        if (!title || !description || !category || !location || !estimatedBudget) {
+            setFormError('All fields are required.');
+            return;
+        }
+        if (isNaN(estimatedBudget) || parseFloat(estimatedBudget) <= 0) {
+            setFormError('Budget must be a positive number.');
+            return;
+        }
+
+        if (!isPaidMember && activeProblemsCount >= MAX_FREE_PROBLEMS) {
+            setFormError(`Free members are limited to ${MAX_FREE_PROBLEMS} active problems. Please upgrade to post more.`);
+            return;
+        }
+
+        onSave({ title, description, category, location, estimatedBudget });
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+                <h3 className="text-2xl font-bold text-gray-800 mb-6">Post a New Problem</h3>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemTitle">
+                            Problem Title
+                        </label>
+                        <input
+                            type="text"
+                            id="problemTitle"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={title}
+                            onChange={(e) => setTitle(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemDescription">
+                            Description
+                        </label>
+                        <textarea
+                            id="problemDescription"
+                            rows="4"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            required
+                        ></textarea>
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemCategory">
+                            Category
+                        </label>
+                        <input
+                            type="text"
+                            id="problemCategory"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={category}
+                            onChange={(e) => setCategory(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemLocation">
+                            Location
+                        </label>
+                        <input
+                            type="text"
+                            id="problemLocation"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={location}
+                            onChange={(e) => setLocation(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="estimatedBudget">
+                            Estimated Budget (R)
+                        </label>
+                        <input
+                            type="number"
+                            id="estimatedBudget"
+                            step="0.01"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={estimatedBudget}
+                            onChange={(e) => setEstimatedBudget(e.target.value)}
+                            required
+                        />
+                    </div>
+
+                    {formError && (
+                        <p className="text-red-500 text-sm">{formError}</p>
+                    )}
+
+                    <div className="flex justify-end space-x-4 mt-6">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
+                        >
+                            Post Problem
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
+// QuoteModal (for providers to submit quotes) - Now used directly in ProblemDetailPage
+const QuoteModal = ({ onClose, onSubmit, problemTitle }) => {
+    const [proposedStartDate, setProposedStartDate] = useState('');
+    const [proposedEndDate, setProposedEndDate] = useState('');
+    const [proposedBudget, setProposedBudget] = useState('');
+    const [motivation, setMotivation] = useState('');
+    const [formError, setFormError] = useState('');
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        setFormError('');
+
+        if (!proposedStartDate || !proposedEndDate || !proposedBudget || !motivation) {
+            setFormError('All fields are required.');
+            return;
+        }
+        if (isNaN(proposedBudget) || parseFloat(proposedBudget) <= 0) {
+            setFormError('Proposed Budget must be a positive number.');
+            return;
+        }
+        if (new Date(proposedStartDate) > new Date(proposedEndDate)) {
+            setFormError('Proposed Start Date cannot be after Proposed End Date.');
+            return;
+        }
+
+        onSubmit({ proposedStartDate, proposedEndDate, proposedBudget: parseFloat(proposedBudget), motivation });
+    };
+
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+                <h3 className="text-2xl font-bold text-gray-800 mb-6">Submit a Quote for "{problemTitle}"</h3>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="proposedStartDate">
+                            Proposed Start Date
+                        </label>
+                        <input
+                            type="date"
+                            id="proposedStartDate"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={proposedStartDate}
+                            onChange={(e) => setProposedStartDate(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="proposedEndDate">
+                            Proposed End Date
+                        </label>
+                        <input
+                            type="date"
+                            id="proposedEndDate"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={proposedEndDate}
+                            onChange={(e) => setProposedEndDate(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="proposedBudget">
+                            Proposed Budget (R)
+                        </label>
+                        <input
+                            type="number"
+                            id="proposedBudget"
+                            step="0.01"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={proposedBudget}
+                            onChange={(e) => setProposedBudget(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="motivation">
+                            Motivation / Details of Work
+                        </label>
+                        <textarea
+                            id="motivation"
+                            rows="5"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={motivation}
+                            onChange={(e) => setMotivation(e.target.value)}
+                            required
+                        ></textarea>
+                    </div>
+
+                    {formError && (
+                        <p className="text-red-500 text-sm">{formError}</p>
+                    )}
+
+                    <div className="flex justify-end space-x-4 mt-6">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            className="px-6 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200"
+                        >
+                            Submit Quote
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+// MemberDetailsModal (Only for accepted providers to view member details)
+const MemberDetailsModal = ({ onClose, memberId }) => {
+    const { userRole, mockUserProfiles, setMessage } = useContext(AppContext);
+    const [memberDetails, setMemberDetails] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
     useEffect(() => {
-        const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                setCurrentUser(user);
-                // Listen to user profile changes in real-time
-                const userDocRef = doc(db, `artifacts/${appId}/users/${user.uid}/profile/doc`);
-                const unsubscribeProfile = onSnapshot(userDocRef, (docSnap) => {
-                    if (docSnap.exists()) {
-                        setUserProfile(docSnap.data());
-                    } else {
-                        // If profile disappears (e.g., deleted by admin), sign out
-                        console.warn("User profile not found, signing out.");
-                        signOut(auth);
-                        setUserProfile(null);
-                        setCurrentUser(null);
-                        setCurrentPage('home');
-                        setShowModal(true);
-                        setModalContent({ title: "Account Issue", message: "Your user profile could not be loaded. You have been logged out." });
-                    }
-                    setLoadingAuth(false);
-                }, (error) => {
-                    console.error("Error fetching user profile:", error);
-                    setLoadingAuth(false);
-                    setShowModal(true);
-                    setModalContent({ title: "Error", message: "Failed to load user profile." });
-                });
+        if (userRole !== 'provider') {
+            setError('Access denied. Only the accepted provider can view member details.');
+            setLoading(false);
+            return;
+        }
 
-                return () => unsubscribeProfile(); // Clean up profile listener
+        setTimeout(() => {
+            const details = mockUserProfiles[memberId];
+            if (details) {
+                setMemberDetails(details);
             } else {
-                setCurrentUser(null);
-                setUserProfile(null);
-                setLoadingAuth(false);
+                setError('Member details not found.');
             }
-        });
+            setLoading(false);
+        }, 300);
+    }, [memberId, userRole, mockUserProfiles]);
 
-        // Attempt to sign in with custom token if available
-        const signInWithToken = async () => {
-            if (initialAuthToken) {
-                try {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                    // onAuthStateChanged will handle setting currentUser and fetching profile
-                } catch (error) {
-                    console.error("Error signing in with custom token:", error);
-                    // Fallback to anonymous or just continue as unauthenticated
-                    await signInAnonymously(auth); // Sign in anonymously if custom token fails
+
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+                <h3 className="text-2xl font-bold text-gray-800 mb-6">Member Details</h3>
+                {loading ? (
+                    <p>Loading...</p>
+                ) : error ? (
+                    <p className="text-red-500">{error}</p>
+                ) : memberDetails ? (
+                    <div className="space-y-4">
+                        <p><span className="font-semibold">Name:</span> {memberDetails.name}</p>
+                        <p><span className="font-semibold">Email:</span> {memberDetails.email || 'N/A'}</p>
+                        <p><span className="font-semibold">Phone:</span> {memberDetails.phone || 'N/A'}</p>
+                        <p><span className="font-semibold">Address:</span> {memberDetails.address || 'N/A'}</p>
+                        <p><span className="font-semibold">Bio:</span> {memberDetails.bio || 'N/A'}</p>
+                    </div>
+                ) : (
+                    <p>No details found.</p>
+                )}
+                <div className="flex justify-end mt-6">
+                    <button
+                        onClick={onClose}
+                        className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                    >
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// ProviderDetailsModal (for members to view accepted provider's details)
+const ProviderDetailsModal = ({ onClose, providerId }) => {
+    const { userRole, mockUserProfiles, setMessage } = useContext(AppContext);
+    const [providerDetails, setProviderDetails] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        if (userRole !== 'member') { // Only members can view this type of details
+            setError('Access denied. Only the requesting member can view provider details here.');
+            setLoading(false);
+            return;
+        }
+
+        setTimeout(() => {
+            const details = mockUserProfiles[providerId];
+            if (details && details.role === 'provider') {
+                setProviderDetails(details);
+            } else {
+                setError('Provider details not found.');
+            }
+            setLoading(false);
+        }, 300);
+    }, [providerId, userRole, mockUserProfiles]);
+
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+                <h3 className="text-2xl font-bold text-gray-800 mb-6">Provider Details</h3>
+                {loading ? (
+                    <p>Loading...</p>
+                ) : error ? (
+                    <p className="text-red-500">{error}</p>
+                ) : providerDetails ? (
+                    <div className="space-y-4">
+                        <p><span className="font-semibold">Company Name:</span> {providerDetails.companyName || 'N/A'}</p>
+                        <p><span className="font-semibold">Contact Person:</span> {providerDetails.name}</p>
+                        <p><span className="font-semibold">Email:</span> {providerDetails.email || 'N/A'}</p>
+                        <p><span className="font-semibold">Phone:</span> {providerDetails.phone || 'N/A'}</p>
+                        <p><span className="font-semibold">Specialties:</span> {providerDetails.specialties || 'N/A'}</p>
+                        <p><span className="font-semibold">Address:</span> {providerDetails.address || 'N/A'}</p>
+                        <p><span className="font-semibold">Bio:</span> {providerDetails.bio || 'N/A'}</p>
+                    </div>
+                ) : (
+                    <p>No details found.</p>
+                )}
+                <div className="flex justify-end mt-6">
+                    <button
+                        onClick={onClose}
+                        className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                    >
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
+// MyQuotesPage (For Providers to manage their submitted quotes)
+const MyQuotesPage = () => {
+    const { userId, mockProblems, setMockProblems, setMessage } = useContext(AppContext);
+    const [myQuotes, setMyQuotes] = useState([]);
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [confirmAction, setConfirmAction] = useState(null);
+    const [confirmMessage, setConfirmMessage] = useState('');
+
+    useEffect(() => {
+        // Flatten all quotes from all problems that belong to the current provider
+        let providerQuotes = [];
+        mockProblems.forEach(problem => {
+            problem.quotes.forEach(quote => {
+                if (quote.providerId === userId) {
+                    providerQuotes.push({
+                        ...quote,
+                        problemId: problem.id,
+                        problemTitle: problem.title, // Add problem title for display
+                        problemStatus: problem.status // Add problem status for context
+                    });
                 }
-            } else {
-                 signInAnonymously(auth); // Sign in anonymously if no token
-            }
-        };
+            });
+        });
+        setMyQuotes(providerQuotes.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+    }, [mockProblems, userId]);
 
-        signInWithToken();
-
-        return () => unsubscribeAuth(); // Clean up auth listener
-    }, [initialAuthToken]); // Only re-run if initialAuthToken changes
-
-    const handleSignOut = async () => {
-        try {
-            await signOut(auth);
-            setCurrentPage('home');
-            setShowModal(true);
-            setModalContent({ title: "Logged Out", message: "You have been successfully logged out." });
-        } catch (error) {
-            console.error("Error signing out:", error);
-            setShowModal(true);
-            setModalContent({ title: "Error", message: "Failed to log out. Please try again." });
-        }
+    const handleWithdrawQuote = (quoteId, problemId) => {
+        setConfirmMessage("Are you sure you want to withdraw this quote?");
+        setConfirmAction(() => () => {
+            setMockProblems(prevProblems =>
+                prevProblems.map(problem => {
+                    if (problem.id === problemId) {
+                        return {
+                            ...problem,
+                            quotes: problem.quotes.filter(quote => quote.id !== quoteId)
+                        };
+                    }
+                    return problem;
+                })
+            );
+            setMessage({ type: 'success', text: 'Quote withdrawn successfully!' });
+            setShowConfirmModal(false);
+        });
+        setMessage({ type: '', text: '' }); // Clear existing message
+        setShowConfirmModal(true);
     };
 
-    const handleNavigate = (page) => {
-        // Enforce private routes
-        if ((page === 'memberDashboard' || page === 'memberProfile' || page === 'memberRequests' || page === 'memberPayments') && (!currentUser || userProfile?.role !== 'member')) {
-            setShowModal(true);
-            setModalContent({ title: "Access Denied", message: "You must be logged in as a member to access this page." });
-            setCurrentPage('login'); // Redirect to login if unauthorized
-            return;
-        }
-        if ((page === 'providerDashboard' || page === 'providerProfile' || page === 'providerRequests' || page === 'providerAssignments' || page === 'providerEarnings') && (!currentUser || userProfile?.role !== 'provider')) {
-            setShowModal(true);
-            setModalContent({ title: "Access Denied", message: "You must be logged in as an approved provider to access this page." });
-            setCurrentPage('login'); // Redirect to login if unauthorized
-            return;
-        }
-        setCurrentPage(page);
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
+                <PackageIcon size={28} className="mr-3 text-[#964b00]" /> My Submitted Quotes
+            </h2>
+
+            {myQuotes.length === 0 ? (
+                <p className="text-gray-600">You haven't submitted any quotes yet. Browse the Problem List to find opportunities!</p>
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="min-w-full bg-white rounded-lg shadow-md">
+                        <thead>
+                            <tr className="bg-gray-200 text-gray-700 uppercase text-sm leading-normal">
+                                <th className="py-3 px-6 text-left">Problem Title</th>
+                                <th className="py-3 px-6 text-left">Amount</th>
+                                <th className="py-3 px-6 text-left">Details</th>
+                                <th className="py-3 px-6 text-left">Status</th>
+                                <th className="py-3 px-6 text-center">Problem Status</th> {/* Added for context */}
+                                <th className="py-3 px-6 text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="text-gray-600 text-sm font-light">
+                            {myQuotes.map(quote => (
+                                <tr key={quote.id} className="border-b border-gray-200 hover:bg-gray-100">
+                                    <td className="py-3 px-6 text-left whitespace-nowrap">{quote.problemTitle || 'N/A'}</td>
+                                    <td className="py-3 px-6 text-left">R{quote.amount?.toFixed(2) || 'N/A'}</td>
+                                    <td className="py-3 px-6 text-left max-w-xs overflow-hidden text-ellipsis">{quote.details || 'N/A'}</td>
+                                    <td className="py-3 px-6 text-left">
+                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                            quote.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                                            quote.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                                            'bg-red-100 text-red-800'
+                                        }`}>
+                                            {quote.status}
+                                        </span>
+                                    </td>
+                                     <td className="py-3 px-6 text-center">
+                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold capitalize ${
+                                            quote.problemStatus === 'open' ? 'bg-gray-100 text-gray-800' :
+                                            quote.problemStatus === 'closed' ? 'bg-blue-100 text-blue-800' :
+                                            'bg-purple-100 text-purple-800'
+                                        }`}>
+                                            {quote.problemStatus || 'N/A'}
+                                        </span>
+                                    </td>
+                                    <td className="py-3 px-6 text-center">
+                                        {quote.status === 'pending' && quote.problemStatus === 'open' && (
+                                            <button
+                                                onClick={() => handleWithdrawQuote(quote.id, quote.problemId)}
+                                                className="px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 text-xs"
+                                            >
+                                                Withdraw
+                                            </button>
+                                        )}
+                                        {quote.status === 'accepted' && (
+                                            <span className="text-green-600 text-sm font-bold">Accepted!</span>
+                                        )}
+                                        {quote.status === 'pending' && quote.problemStatus === 'closed' && (
+                                             <span className="text-gray-500 text-xs">Problem Closed</span>
+                                        )}
+                                        {quote.status === 'pending' && quote.problemStatus === 'resolved' && (
+                                             <span className="text-gray-500 text-xs">Problem Resolved</span>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+            {showConfirmModal && (
+                <ConfirmationModal
+                    message={confirmMessage}
+                    onConfirm={confirmAction}
+                    onCancel={() => setShowConfirmModal(false)}
+                />
+            )}
+        </div>
+    );
+};
+
+// MyRequestsPage (For Members to manage their posted problems and received quotes)
+const MyRequestsPage = () => {
+    const { userId, mockProblems, setMockProblems, isPaidMember, setMessage } = useContext(AppContext);
+    const [myProblems, setMyProblems] = useState([]);
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [confirmAction, setConfirmAction] = useState(null);
+    const [confirmMessage, setConfirmMessage] = useState('');
+
+    useEffect(() => {
+        // Filter problems posted by the current user
+        const memberProblems = mockProblems.filter(problem => problem.requesterId === userId);
+        setMyProblems(memberProblems.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+    }, [mockProblems, userId]);
+
+    const handleAcceptQuote = (problemId, quoteId, providerId) => {
+        setConfirmMessage("By accepting this quote, your contact information (name, email, phone) will be shared with the selected provider. Do you wish to proceed?");
+        setConfirmAction(() => () => {
+            setMockProblems(prevProblems =>
+                prevProblems.map(problem => {
+                    if (problem.id === problemId) {
+                        return {
+                            ...problem,
+                            status: 'closed',
+                            acceptedQuoteId: quoteId,
+                            quotes: problem.quotes.map(q =>
+                                q.id === quoteId ? { ...q, status: 'accepted' } : q
+                            )
+                        };
+                    }
+                    return problem;
+                })
+            );
+            setMessage({ type: 'success', text: 'Quote accepted and problem closed! Provider contact details now available.' });
+            setShowConfirmModal(false);
+        });
+        setMessage({ type: '', text: '' }); // Clear existing message
+        setShowConfirmModal(true);
     };
 
-    if (loadingAuth) {
+    const handleMarkProblemResolved = (problemId) => {
+        setConfirmMessage("Are you sure you want to mark this problem as resolved? This cannot be undone.");
+        setConfirmAction(() => () => {
+            setMockProblems(prevProblems =>
+                prevProblems.map(problem =>
+                    problem.id === problemId ? { ...problem, status: 'resolved' } : problem
+                )
+            );
+            setMessage({ type: 'success', text: 'Problem marked as resolved!' });
+            setShowConfirmModal(false);
+        });
+        setMessage({ type: '', text: '' }); // Clear existing message
+        setShowConfirmModal(true);
+    };
+
+    const handleDeleteProblem = (problemId) => {
+        setConfirmMessage("Are you sure you want to delete this problem and all associated quotes? This action is irreversible.");
+        setConfirmAction(() => () => {
+            setMockProblems(prevProblems => prevProblems.filter(problem => problem.id !== problemId));
+            setMessage({ type: 'success', text: 'Problem and all associated quotes deleted successfully!' });
+            setShowConfirmModal(false);
+        });
+        setMessage({ type: '', text: '' }); // Clear existing message
+        setShowConfirmModal(true);
+    };
+
+
+    if (!isPaidMember) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-amber-50">
-                <LoadingSpinner message="Initializing application..." />
+            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12">
+                <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
+                <p className="text-gray-700 mb-6">
+                    You must be a **paid member** to view and manage quotes for your problems.
+                    Free members can post problems (limit 5) but require a paid membership for full interaction.
+                </p>
+                <button
+                    onClick={() => alert('Feature to upgrade membership is not implemented in this demo.')} // Placeholder
+                    className="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200"
+                >
+                    Upgrade Membership
+                </button>
             </div>
         );
     }
 
-    let content;
-    switch (currentPage) {
-        case 'home':
-            content = <HomePage onNavigate={handleNavigate} userId={currentUser?.uid} userProfile={userProfile} currentAuthUser={currentUser} />;
-            break;
-        case 'login':
-            content = <LoginPage onNavigate={handleNavigate} setCurrentUser={setCurrentUser} setUserProfile={setUserProfile} setShowModal={setShowModal} setModalContent={setModalContent} />;
-            break;
-        case 'signup':
-            content = <SignupPage onNavigate={handleNavigate} setShowModal={setShowModal} setModalContent={setModalContent} />;
-            break;
-        case 'becomeProvider':
-            content = <BecomeProviderPage onNavigate={handleNavigate} userId={currentUser?.uid} setShowModal={setShowModal} setModalContent={setModalContent} userProfile={userProfile} />;
-            break;
-        case 'pricing':
-            content = <PricingPage onNavigate={handleNavigate} />;
-            break;
-        case 'problemLists':
-            content = <ProblemListsPage onNavigate={handleNavigate} />;
-            break;
-        case 'memberDashboard':
-            content = (
-                <MemberDashboardLayout onNavigate={handleNavigate} userProfile={userProfile} handleSignOut={handleSignOut}>
-                    <MemberDashboardPage userProfile={userProfile} onNavigate={handleNavigate} />
-                </MemberDashboardLayout>
-            );
-            break;
-        case 'memberProfile':
-            content = (
-                <MemberDashboardLayout onNavigate={handleNavigate} userProfile={userProfile} handleSignOut={handleSignOut}>
-                    <MemberProfilePage userProfile={userProfile} userId={currentUser?.uid} setShowModal={setShowModal} setModalContent={setModalContent} />
-                </MemberDashboardLayout>
-            );
-            break;
-        case 'memberRequests':
-            content = (
-                <MemberDashboardLayout onNavigate={handleNavigate} userProfile={userProfile} handleSignOut={handleSignOut}>
-                    <MemberRequestsPage userId={currentUser?.uid} userProfile={userProfile} setShowModal={setShowModal} setModalContent={setModalContent} />
-                </MemberDashboardLayout>
-            );
-            break;
-        case 'memberPayments':
-            content = (
-                <MemberDashboardLayout onNavigate={handleNavigate} userProfile={userProfile} handleSignOut={handleSignOut}>
-                    <MemberPaymentsPage setShowModal={setShowModal} setModalContent={setModalContent} userProfile={userProfile} userId={currentUser?.uid} />
-                </MemberDashboardLayout>
-            );
-            break;
-        case 'providerDashboard':
-            content = (
-                <ProviderDashboardLayout onNavigate={handleNavigate} userProfile={userProfile} handleSignOut={handleSignOut}>
-                    <ProviderDashboardPage userProfile={userProfile} onNavigate={handleNavigate} />
-                </ProviderDashboardLayout>
-            );
-            break;
-        case 'providerProfile':
-            content = (
-                <ProviderDashboardLayout onNavigate={handleNavigate} userProfile={userProfile} handleSignOut={handleSignOut}>
-                    <ProviderProfilePage userProfile={userProfile} userId={currentUser?.uid} setShowModal={setShowModal} setModalContent={setModalContent} />
-                </ProviderDashboardLayout>
-            );
-            break;
-        case 'providerRequests':
-            content = (
-                <ProviderDashboardLayout onNavigate={handleNavigate} userProfile={userProfile} handleSignOut={handleSignOut}>
-                    <ProviderRequestsPage userId={currentUser?.uid} userProfile={userProfile} setShowModal={setShowModal} setModalContent={setModalContent} />
-                </ProviderDashboardLayout>
-            );
-            break;
-        case 'providerAssignments':
-            content = (
-                <ProviderDashboardLayout onNavigate={handleNavigate} userProfile={userProfile} handleSignOut={handleSignOut}>
-                    <ProviderAssignmentsPage userId={currentUser?.uid} userProfile={userProfile} setShowModal={setShowModal} setModalContent={setModalContent} />
-                </ProviderDashboardLayout>
-            );
-            break;
-        case 'providerEarnings':
-            content = (
-                <ProviderDashboardLayout onNavigate={handleNavigate} userProfile={userProfile} handleSignOut={handleSignOut}>
-                    <ProviderEarningsPage userId={currentUser?.uid} userProfile={userProfile} setShowModal={setShowModal} setModalContent={setModalContent} />
-                </ProviderDashboardLayout>
-            );
-            break;
-        default:
-            content = <HomePage onNavigate={handleNavigate} userId={currentUser?.uid} userProfile={userProfile} currentAuthUser={currentUser} />;
-            break;
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
+                <FileTextIcon size={28} className="mr-3 text-[#964b00]" /> My Posted Problems & Quotes
+            </h2>
+
+            {myProblems.length === 0 ? (
+                <p className="text-gray-600">You haven't posted any problems yet. Click "Post New Problem" on the Problem List page!</p>
+            ) : (
+                <div className="space-y-6">
+                    {myProblems.map(problem => (
+                        <div key={problem.id} className="border border-gray-200 rounded-lg p-4 shadow-sm bg-gray-50">
+                            <div className="flex justify-between items-center mb-3">
+                                <h3 className="text-xl font-bold text-gray-800">{problem.title}</h3>
+                                <span className={`px-3 py-1 rounded-full text-sm font-semibold capitalize ${
+                                    problem.status === 'open' ? 'bg-yellow-100 text-yellow-800' :
+                                    problem.status === 'closed' ? 'bg-blue-100 text-blue-800' :
+                                    'bg-green-100 text-green-800'
+                                }`}>
+                                    {problem.status}
+                                </span>
+                            </div>
+                            <p className="text-gray-700 mb-2">{problem.description}</p>
+                            <p className="text-gray-600 text-sm">Category: {problem.category}</p>
+                            <p className="text-gray-500 text-xs mt-1">Posted: {problem.createdAt?.toLocaleString()}</p>
+                            {!problem.isApproved && (
+                                <span className="px-2 py-1 text-xs font-semibold bg-red-100 text-red-800 rounded-full mt-2 inline-block">Awaiting Admin Approval</span>
+                            )}
+
+                            <div className="mt-4 flex space-x-3">
+                                <button
+                                    onClick={() => { /* In a real app, this would navigate to problem-detail page */ alert('Navigating to problem details for: ' + problem.title); }}
+                                    className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 text-sm flex items-center"
+                                >
+                                    <PackageIcon size={18} className="mr-2" /> View Quotes ({problem.quotes?.length || 0})
+                                </button>
+                                {problem.status === 'open' && (
+                                    <button
+                                        onClick={() => handleDeleteProblem(problem.id)}
+                                        className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 text-sm flex items-center"
+                                    >
+                                        <XCircleIcon size={18} className="mr-2" /> Delete Problem
+                                    </button>
+                                )}
+                                {(problem.status === 'closed' && problem.acceptedQuoteId) && (
+                                    <button
+                                        onClick={() => handleMarkProblemResolved(problem.id)}
+                                        className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200 text-sm flex items-center"
+                                    >
+                                        <CheckCircleIcon size={18} className="mr-2" /> Mark as Resolved
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+             {showConfirmModal && (
+                <ConfirmationModal
+                    message={confirmMessage}
+                    onConfirm={confirmAction}
+                    onCancel={() => setShowConfirmModal(false)}
+                />
+            )}
+        </div>
+    );
+};
+
+
+// AdminToolsPage
+const AdminToolsPage = ({ onNavigate }) => { // onNavigate prop added
+    const { userRole, mockProblems, setMockProblems, mockUserProfiles, setMockUserProfiles, setMessage } = useContext(AppContext);
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [confirmAction, setConfirmAction] = useState(null);
+    const [confirmMessage, setConfirmMessage] = useState('');
+
+    if (userRole !== 'admin') {
+        return (
+            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12">
+                <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
+                <p className="text-gray-700 mb-6">You must be an **admin** to access this page.</p>
+            </div>
+        );
     }
 
+    const handleApproveProblem = (problemId) => {
+        setMockProblems(prevProblems =>
+            prevProblems.map(problem =>
+                problem.id === problemId ? { ...problem, isApproved: true } : problem
+            )
+        );
+        setMessage({ type: 'success', text: `Problem ${problemId} approved.` });
+    };
+
+    const handleDeleteProblem = (problemId) => {
+        setConfirmMessage("Are you sure you want to delete this problem and all its quotes? This is permanent.");
+        setConfirmAction(() => () => {
+            setMockProblems(prevProblems => prevProblems.filter(problem => problem.id !== problemId));
+            setMessage({ type: 'success', text: `Problem ${problemId} deleted.` });
+            setShowConfirmModal(false);
+        });
+        setShowConfirmModal(true);
+    };
+
+    const handleApproveProvider = (providerId) => {
+        setMockUserProfiles(prevProfiles => ({
+            ...prevProfiles,
+            [providerId]: { ...prevProfiles[providerId], isProviderApproved: true }
+        }));
+        setMessage({ type: 'success', text: `Provider ${mockUserProfiles[providerId]?.name} approved.` });
+    };
+
+    const handleDeleteProvider = (providerId) => {
+        setConfirmMessage("Are you sure you want to delete this provider? This will remove their profile.");
+        setConfirmAction(() => () => {
+            setMockUserProfiles(prevProfiles => {
+                const newProfiles = { ...prevProfiles };
+                delete newProfiles[providerId];
+                return newProfiles;
+            });
+            setMessage({ type: 'success', text: `Provider ${providerId} deleted.` });
+            setShowConfirmModal(false);
+        });
+        setShowConfirmModal(true);
+    };
+
+    const problemsAwaitingApproval = mockProblems.filter(p => !p.isApproved);
+    const pendingProviderApprovals = Object.values(mockUserProfiles).filter(p => p.role === 'provider' && !p.isProviderApproved);
+    const allProviders = Object.values(mockUserProfiles).filter(p => p.role === 'provider');
+
+
     return (
-        <>
-            {/* Tailwind CSS CDN and Font */}
-            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
-            <script src="https://cdn.tailwindcss.com"></script>
-            <style>
-                {`
-                body {
-                    font-family: 'Inter', sans-serif;
-                }
-                /* chart-container styling is now primarily handled by Tailwind classes on the div itself */
-                .chart-container {
-                    position: relative;
-                }
-                `}
-            </style>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
+                <ShieldCheckIcon size={28} className="mr-3 text-[#964b00]" /> Admin Tools
+            </h2>
 
-            {content}
+            <div className="space-y-8">
+                {/* Admin Quick Actions */}
+                <div className="border border-gray-200 rounded-lg p-4">
+                    <h3 className="text-xl font-bold text-gray-700 mb-4">Admin Quick Links</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <button
+                            onClick={() => onNavigate('admin-pricing')}
+                            className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 flex items-center justify-center"
+                        >
+                            <DollarSignIcon size={20} className="mr-2" /> Manage Pricing Plans
+                        </button>
+                        <button
+                            onClick={() => onNavigate('admin-branding')} // New button for branding
+                            className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 flex items-center justify-center"
+                        >
+                            <PaintbrushIcon size={20} className="mr-2" /> Manage Branding
+                        </button>
+                    </div>
+                </div>
 
-            <Modal
-                show={showModal}
-                title={modalContent.title}
-                message={modalContent.message}
-                onClose={() => setShowModal(false)}
-            />
-        </>
+                {/* Problem Management */}
+                <div className="border border-gray-200 rounded-lg p-4">
+                    <h3 className="text-xl font-bold text-gray-700 mb-4">Problem Management</h3>
+                    <h4 className="text-lg font-semibold text-gray-600 mb-3">Problems Awaiting Approval ({problemsAwaitingApproval.length})</h4>
+                    {problemsAwaitingApproval.length === 0 ? (
+                        <p className="text-gray-500">No problems awaiting approval.</p>
+                    ) : (
+                        <ul className="divide-y divide-gray-200">
+                            {problemsAwaitingApproval.map(problem => (
+                                <li key={problem.id} className="py-2 flex justify-between items-center">
+                                    <span>{problem.title} (by {mockUserProfiles[problem.requesterId]?.name || 'Unknown'})</span>
+                                    <div>
+                                        <button
+                                            onClick={() => handleApproveProblem(problem.id)}
+                                            className="ml-3 px-3 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 text-sm"
+                                        >
+                                            Approve
+                                        </button>
+                                        <button
+                                            onClick={() => handleDeleteProblem(problem.id)}
+                                            className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+
+                     <h4 className="text-lg font-semibold text-gray-600 mt-6 mb-3">All Problems ({mockProblems.length})</h4>
+                     <ul className="divide-y divide-gray-200">
+                        {mockProblems.map(problem => (
+                            <li key={problem.id} className="py-2 flex justify-between items-center">
+                                <span>{problem.title} ({problem.status} - {problem.isApproved ? 'Approved' : 'Pending'})</span>
+                                <button
+                                    onClick={() => handleDeleteProblem(problem.id)}
+                                    className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm"
+                                >
+                                    Delete
+                                </button>
+                            </li>
+                        ))}
+                     </ul>
+                </div>
+
+                {/* Provider Management */}
+                <div className="border border-gray-200 rounded-lg p-4">
+                    <h3 className="text-xl font-bold text-gray-700 mb-4">Provider Management</h3>
+                    <h4 className="text-lg font-semibold text-gray-600 mb-3">Providers Awaiting Approval ({pendingProviderApprovals.length})</h4>
+                    {pendingProviderApprovals.length === 0 ? (
+                        <p className="text-gray-500">No providers awaiting approval.</p>
+                    ) : (
+                        <ul className="divide-y divide-gray-200">
+                            {pendingProviderApprovals.map(provider => (
+                                <li key={provider.uid} className="py-2 flex justify-between items-center">
+                                    <span>{provider.name} ({provider.companyName || 'N/A'})</span>
+                                    <div>
+                                        <button
+                                            onClick={() => handleApproveProvider(provider.uid)}
+                                            className="ml-3 px-3 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 text-sm"
+                                        >
+                                            Approve
+                                        </button>
+                                        <button
+                                            onClick={() => handleDeleteProvider(provider.uid)}
+                                            className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                    <h4 className="text-lg font-semibold text-gray-600 mt-6 mb-3">All Providers ({allProviders.length})</h4>
+                     <ul className="divide-y divide-gray-200">
+                        {allProviders.map(provider => (
+                            <li key={provider.uid} className="py-2 flex justify-between items-center">
+                                <span>{provider.name} ({provider.isProviderApproved ? 'Approved' : 'Pending'})</span>
+                                <button
+                                    onClick={() => handleDeleteProvider(provider.uid)}
+                                    className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm"
+                                >
+                                    Delete
+                                </button>
+                            </li>
+                        ))}
+                     </ul>
+                </div>
+            </div>
+            {showConfirmModal && (
+                <ConfirmationModal
+                    message={confirmMessage}
+                    onConfirm={confirmAction}
+                    onCancel={() => setShowConfirmModal(false)}
+                />
+            )}
+        </div>
+    );
+};
+
+// AdminPricingPage component
+const AdminPricingPage = () => {
+    const { userRole, mockPricingPlans, setMockPricingPlans, setMessage } = useContext(AppContext);
+    const [showEditPlanModal, setShowEditPlanModal] = useState(false);
+    const [currentEditingPlan, setCurrentEditingPlan] = useState(null); // null for new, object for edit
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [confirmAction, setConfirmAction] = useState(null);
+    const [confirmMessage, setConfirmMessage] = useState('');
+
+    if (userRole !== 'admin') {
+        return (
+            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12">
+                <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
+                <p className="text-gray-700 mb-6">You must be an **admin** to access this page.</p>
+            </div>
+        );
+    }
+
+    const handleAddPlan = () => {
+        setCurrentEditingPlan(null); // Indicate new plan
+        setShowEditPlanModal(true);
+    };
+
+    const handleEditPlan = (plan) => {
+        setCurrentEditingPlan(plan);
+        setShowEditPlanModal(true);
+    };
+
+    const handleSavePlan = (updatedPlan) => {
+        if (updatedPlan.id) {
+            // Edit existing plan
+            setMockPricingPlans(prevPlans =>
+                prevPlans.map(p => (p.id === updatedPlan.id ? updatedPlan : p))
+            );
+            setMessage({ type: 'success', text: `Plan "${updatedPlan.name}" updated successfully!` });
+        } else {
+            // Add new plan
+            const newPlan = { ...updatedPlan, id: crypto.randomUUID() };
+            setMockPricingPlans(prevPlans => [...prevPlans, newPlan]);
+            setMessage({ type: 'success', text: `New plan "${newPlan.name}" added successfully!` });
+        }
+        setShowEditPlanModal(false);
+    };
+
+    const handleDeletePlan = (planId, planName) => {
+        setConfirmMessage(`Are you sure you want to delete the plan "${planName}"? This action cannot be undone.`);
+        setConfirmAction(() => () => {
+            setMockPricingPlans(prevPlans => prevPlans.filter(p => p.id !== planId));
+            setMessage({ type: 'success', text: `Plan "${planName}" deleted successfully!` });
+            setShowConfirmModal(false);
+        });
+        setShowConfirmModal(true);
+    };
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center justify-between">
+                <DollarSignIcon size={28} className="mr-3 text-[#964b00]" /> Manage Pricing Plans
+                <button
+                    onClick={handleAddPlan}
+                    className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 flex items-center"
+                >
+                    <PlusCircleIcon size={18} className="mr-2" /> Add New Plan
+                </button>
+            </h2>
+
+            {mockPricingPlans.length === 0 ? (
+                <p className="text-gray-600">No pricing plans defined. Add one to get started!</p>
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="min-w-full bg-white rounded-lg shadow-md">
+                        <thead>
+                            <tr className="bg-gray-200 text-gray-700 uppercase text-sm leading-normal">
+                                <th className="py-3 px-6 text-left">Plan Name</th>
+                                <th className="py-3 px-6 text-left">Price</th>
+                                <th className="py-3 px-6 text-left">Interval</th>
+                                <th className="py-3 px-6 text-left">Plan Code</th>
+                                <th className="py-3 px-6 text-left">Features</th>
+                                <th className="py-3 px-6 text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="text-gray-600 text-sm font-light">
+                            {mockPricingPlans.map(plan => (
+                                <tr key={plan.id} className="border-b border-gray-200 hover:bg-gray-100">
+                                    <td className="py-3 px-6 text-left font-semibold">{plan.name}</td>
+                                    <td className="py-3 px-6 text-left">{plan.price}</td>
+                                    <td className="py-3 px-6 text-left capitalize">{plan.interval}</td>
+                                    <td className="py-3 px-6 text-left font-mono text-xs">{plan.planCode || 'N/A'}</td>
+                                    <td className="py-3 px-6 text-left">
+                                        <ul className="list-disc list-inside">
+                                            {plan.features.map((feature, idx) => (
+                                                <li key={idx} className="whitespace-nowrap overflow-hidden text-ellipsis">{feature}</li>
+                                            ))}
+                                        </ul>
+                                    </td>
+                                    <td className="py-3 px-6 text-center whitespace-nowrap">
+                                        <button
+                                            onClick={() => handleEditPlan(plan)}
+                                            className="px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 text-xs mr-2"
+                                        >
+                                            Edit
+                                        </button>
+                                        <button
+                                            onClick={() => handleDeletePlan(plan.id, plan.name)}
+                                            className="px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 text-xs"
+                                        >
+                                            Delete
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            {showEditPlanModal && (
+                <EditPricingPlanModal
+                    plan={currentEditingPlan}
+                    onClose={() => setShowEditPlanModal(false)}
+                    onSave={handleSavePlan}
+                />
+            )}
+             {showConfirmModal && (
+                <ConfirmationModal
+                    message={confirmMessage}
+                    onConfirm={confirmAction}
+                    onCancel={() => setShowConfirmModal(false)}
+                />
+            )}
+        </div>
+    );
+};
+
+// EditPricingPlanModal component
+const EditPricingPlanModal = ({ plan, onClose, onSave }) => {
+    const [formData, setFormData] = useState({
+        id: plan?.id || null,
+        name: plan?.name || '',
+        price: plan?.price?.replace('R', '').replace('/month', '') || '', // Extract numerical part
+        rawPrice: plan?.rawPrice || '',
+        interval: plan?.interval || 'monthly',
+        planCode: plan?.planCode || '',
+        features: plan?.features?.join('\n') || '', // Convert array to newline separated string
+    });
+    const [formError, setFormError] = useState('');
+
+    useEffect(() => {
+        if (plan) {
+            setFormData({
+                id: plan.id,
+                name: plan.name,
+                price: plan.price.replace('R', '').replace('/month', ''),
+                rawPrice: plan.rawPrice,
+                interval: plan.interval,
+                planCode: plan.planCode,
+                features: plan.features.join('\n'),
+            });
+        }
+    }, [plan]);
+
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        setFormError('');
+
+        const { name, price, interval, planCode, features } = formData;
+
+        if (!name || !price || !interval || !planCode || !features) {
+            setFormError('All fields are required.');
+            return;
+        }
+        const parsedPrice = parseFloat(price);
+        if (isNaN(parsedPrice) || parsedPrice <= 0) {
+            setFormError('Price must be a positive number.');
+            return;
+        }
+
+        const updatedPlan = {
+            id: formData.id,
+            name,
+            price: `R${parsedPrice.toFixed(0)}/${interval}`, // Reformat price string
+            rawPrice: parsedPrice,
+            interval,
+            planCode,
+            features: features.split('\n').map(f => f.trim()).filter(f => f), // Convert back to array
+        };
+
+        onSave(updatedPlan);
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+                <h3 className="text-2xl font-bold text-gray-800 mb-6">{plan ? 'Edit Pricing Plan' : 'Add New Pricing Plan'}</h3>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planName">
+                            Plan Name
+                        </label>
+                        <input
+                            type="text"
+                            id="planName"
+                            name="name"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={formData.name}
+                            onChange={handleChange}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planPrice">
+                            Price (e.g., 50, 150)
+                        </label>
+                        <input
+                            type="number"
+                            id="planPrice"
+                            name="price"
+                            step="1"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={formData.price}
+                            onChange={handleChange}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planInterval">
+                            Interval
+                        </label>
+                        <select
+                            id="planInterval"
+                            name="interval"
+                            className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={formData.interval}
+                            onChange={handleChange}
+                            required
+                        >
+                            <option value="monthly">Monthly</option>
+                            <option value="yearly">Yearly</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planCode">
+                            Paystack Plan Code
+                        </label>
+                        <input
+                            type="text"
+                            id="planCode"
+                            name="planCode"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={formData.planCode}
+                            onChange={handleChange}
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planFeatures">
+                            Features (one per line)
+                        </label>
+                        <textarea
+                            id="planFeatures"
+                            name="features"
+                            rows="5"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={formData.features}
+                            onChange={handleChange}
+                            required
+                        ></textarea>
+                    </div>
+
+                    {formError && (
+                        <p className="text-red-500 text-sm">{formError}</p>
+                    )}
+
+                    <div className="flex justify-end space-x-4 mt-6">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
+                        >
+                            {plan ? 'Save Changes' : 'Add Plan'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
+// SettingsPage
+const SettingsPage = () => {
+    const { userId, userRole, isPaidMember } = useContext(AppContext);
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
+                <SettingsIcon size={28} className="mr-3 text-[#964b00]" /> Settings
+            </h2>
+            <div className="space-y-4">
+                <div className="p-4 bg-gray-50 rounded-md border border-gray-200">
+                    <h3 className="text-xl font-semibold text-gray-700 mb-2">Account Information</h3>
+                    <p className="text-gray-600">Your unique User ID: <span className="font-mono bg-gray-200 px-2 py-1 rounded-sm text-sm">{userId || 'N/A'}</span></p>
+                    <p className="text-gray-600">Your Role: <span className="font-semibold capitalize">{userRole}</span></p>
+                    {userRole === 'member' && (
+                        <p className="text-gray-600">Membership Status: <span className={`font-semibold ${isPaidMember ? 'text-blue-600' : 'text-yellow-600'}`}>{isPaidMember ? 'Paid' : 'Free'}</span></p>
+                    )}
+                    <p className="text-gray-600 mt-2">Manage your public profile visibility and contact information from the Profile page.</p>
+                </div>
+                {/* Additional settings can be added here */}
+                <div className="p-4 bg-gray-50 rounded-md border border-gray-200">
+                    <h3 className="text-xl font-semibold text-gray-700 mb-2">Notification Preferences</h3>
+                    <p className="text-gray-600">Configure how you receive alerts for new activity.</p>
+                    <div className="mt-3 flex items-center">
+                        <input type="checkbox" id="email-notifications" className="mr-2" defaultChecked />
+                        <label htmlFor="email-notifications" className="text-gray-700">Email notifications</label>
+                    </div>
+                    <div className="mt-2 flex items-center">
+                        <input type="checkbox" id="sms-notifications" className="mr-2" />
+                        <label htmlFor="sms-notifications" className="text-gray-700">SMS notifications (coming soon)</label>
+                    </div>
+                </div>
+
+                <div className="p-4 bg-gray-50 rounded-md border border-gray-200">
+                    <h3 className="text-xl font-semibold text-gray-700 mb-2">Data Management</h3>
+                    <p className="text-gray-600">Review and manage your data.</p>
+                    <button className="mt-3 px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 transition-colors duration-200">
+                        Export My Data
+                    </button>
+                </div>
+            </div>
+        </div>
     );
 };
 
