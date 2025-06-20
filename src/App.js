@@ -644,6 +644,63 @@ const AdminBrandingPage = () => {
         </div>
     );
 };
+// Add this component definition before it's used (before line 647)
+const AdminBrandingPage = () => {
+    const { userId, userRole, isPaidMember } = useContext(AppContext);
+    
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
+                <SettingsIcon size={28} className="mr-3 text-[#964b00]" /> Admin Branding
+            </h2>
+            <div className="space-y-6">
+                <div className="p-4 bg-gray-50 rounded-md border border-gray-200">
+                    <h3 className="text-xl font-semibold text-gray-700 mb-4">Brand Customization</h3>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Company Logo
+                            </label>
+                            <input 
+                                type="file" 
+                                accept="image/*"
+                                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Primary Color
+                            </label>
+                            <input 
+                                type="color" 
+                                defaultValue="#964b00"
+                                className="h-10 w-20 rounded-md border border-gray-300"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Company Name
+                            </label>
+                            <input 
+                                type="text" 
+                                placeholder="Enter company name"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                        </div>
+                    </div>
+                    <div className="flex justify-end space-x-4 mt-6">
+                        <button className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">
+                            Reset to Default
+                        </button>
+                        <button className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200">
+                            Save Changes
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
                                     case 'admin-tools':
                                     return userRole === 'admin' ? <AdminToolsPage onNavigate={setCurrentPage} /> : null;
                                 case 'admin-pricing':
