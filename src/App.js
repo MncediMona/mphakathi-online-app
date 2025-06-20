@@ -586,12 +586,45 @@ const App = () => {
                         </div>
                     )}
                 </aside>
+
+// ... some part of your JSX structure ends here, but not cleanly ...
+)} // <--- THIS IS THE ISSUE: An unclosed JavaScript/JSX expression/block
+
+// At the top of your file, after imports but before the App component definition:
 // Paystack configuration using environment variables
 const paystackConfig = {
   publicKey: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY || "pk_live_fdf4452ee756cc1e801f39ebd70f25bb67a005e8",
   callbackUrl: process.env.REACT_APP_PAYSTACK_CALLBACK_URL || "https://app.mphakathi.online",
-  webhookUrl: process.env.REACT_APP_PAYSTACK_WEBHOOK_URL || "https://app.mphakathi.online"
-                {/* Main content */}
+  webhookUrl: process.env.REACT_APP_PAYSTACK_WEBHOOK_URL || "https://app.mphakathi.online",
+};
+
+// ... (Your App component definition starts here)
+function App() {
+    // ... other component logic, state, useEffects ...
+
+    return (
+        // You MUST wrap everything in a single parent element.
+        // I'm assuming there's an outer div or fragment that contains the 'aside'
+        // and the 'flex-1' div. If not, add one.
+
+        // Example assuming your App component returns something like this:
+        <div className="app-container">
+  {/* This is the single root element */}
+  <aside>
+    {/* ... content inside aside ... */}
+  </aside>
+  {/* This div should be *inside* the single root element */}
+  <div className="flex-1 flex flex-col">
+    {/* ... content inside the flex-1 div ... */}
+  </div>
+</div>
+    );
+}
+
+export default App; // Don't forget to export your component
+
+            <div className="flex-1 flex flex-col">
+
                 <div className="flex-1 flex flex-col">
                     <header className="bg-white shadow p-4 md:p-6 flex items-center justify-between">
                         <h1 className="text-2xl font-bold text-gray-800">
