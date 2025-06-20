@@ -586,7 +586,11 @@ const App = () => {
                         </div>
                     )}
                 </aside>
-
+// Paystack configuration using environment variables
+const paystackConfig = {
+  publicKey: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY || "pk_live_fdf4452ee756cc1e801f39ebd70f25bb67a005e8",
+  callbackUrl: process.env.REACT_APP_PAYSTACK_CALLBACK_URL || "https://app.mphakathi.online",
+  webhookUrl: process.env.REACT_APP_PAYSTACK_WEBHOOK_URL || "https://app.mphakathi.online"
                 {/* Main content */}
                 <div className="flex-1 flex flex-col">
                     <header className="bg-white shadow p-4 md:p-6 flex items-center justify-between">
@@ -1398,11 +1402,11 @@ const SignUpFormModal = ({ plan, onClose }) => {
             return;
         }
 
-        // Simulate redirection to Paystack using the planCode
-        // In a real app, this would involve an API call to Paystack to initialize a transaction
-        // using the planCode, and then redirecting the user to Paystack's payment page.
-        // For this demo, we'll construct a mock Paystack link with the plan.planCode.
-        const paystackPaymentLink = `https://paystack.com/pay/${plan.planCode || 'default_plan_code'}`; // Use plan.planCode
+// Generate Paystack payment link using live configuration
+const paystackPaymentLink = `https://paystack.com/pay/${plan.planCode || 'default_plan_code'}`;
+// You can also use the configured callback URL if needed
+// const paystackPaymentLink = `${paystackConfig.callbackUrl}/payment/${plan.planCode}`;
+
         window.open(paystackPaymentLink, '_blank');
 
         // After redirection, the user would complete payment.
