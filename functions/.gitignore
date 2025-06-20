@@ -1,0 +1,7 @@
+*.local
+# Git ignore file for Node.js projects
+node_modules/
+.env
+build/ # While you deploy build, you typically don't commit it
+# ... other ignored files/folders
+build/
