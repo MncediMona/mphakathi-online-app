@@ -1,4 +1,5 @@
-import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import { useAuth0 } from '@auth0/auth0-react'; // Import the Auth0 hook
 
 // Lucide React icons (re-defined for completeness)
 const HomeIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
@@ -19,6 +20,13 @@ const KeyIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org
 const CheckCircle2Icon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>;
 const PaintbrushIcon = ({ size = 24, className = "" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18.37 2.63c-1.3-1.3-3.9-1.3-5.2 0l-7.2 7.2c-1.3 1.3-1.3 3.9 0 5.2l2.4 2.4c1.3 1.3 3.9 1.3 5.2 0l7.2-7.2c1.3-1.3 1.3-3.9 0-5.2zm-2.4 2.4l-.8.8m-2.4 2.4l-.8.8m-2.4 2.4l-.8.8m-2.4 2.4l-.8.8"/><path d="M12 22h10"/></svg>;
 
+
+// --- Constants for API Endpoints ---
+// Use environment variables for the base URL in a real app.
+// For local development, explicitly use the Netlify deployed URL for functions.
+const API_BASE_URL = process.env.NODE_ENV === 'production'
+    ? '/.netlify/functions'
+    : 'https://mphakathi-online-app.netlify.app/.netlify/functions';
 
 // --- Custom Confirmation Modal ---
 const ConfirmationModal = ({ message, onConfirm, onCancel, confirmText = "Confirm", cancelText = "Cancel" }) => {
@@ -48,345 +56,431 @@ const ConfirmationModal = ({ message, onConfirm, onCancel, confirmText = "Confir
 // --- Application Context ---
 const AppContext = createContext(null);
 
+// --- Custom Hook for Permissions ---
+const usePermissions = () => {
+    const { userRole, isAuthenticated } = useContext(AppContext);
+
+    /**
+     * Checks if the current user has any of the required roles.
+     * @param {string|string[]} requiredRoles - A single role string or an array of role strings.
+     * @returns {boolean} True if the user has at least one of the required roles, false otherwise.
+     */
+    const canAccess = (requiredRoles) => {
+        if (!isAuthenticated) {
+            return false;
+        }
+        const rolesArray = Array.isArray(requiredRoles) ? requiredRoles : [requiredRoles];
+        return rolesArray.includes(userRole);
+    };
+
+    return { canAccess };
+};
+
+
 const App = () => {
-    // Mock user data (in-memory, resets on refresh)
-    const [userId, setUserId] = useState(crypto.randomUUID()); // Generate a new ID on each load
-    const [userProfile, setUserProfile] = useState(() => {
-        // Default to 'member' for initial load, can be toggled via mock login/role switch
-        const initialRole = 'loggedOut'; // Start as logged out
-        return {
-            uid: '', // Set empty for loggedOut
-            name: 'Guest User',
-            email: '',
-            phone: '',
-            role: initialRole,
-            isProviderApproved: false,
-            isPaidMember: false,
-            bio: '',
-            address: '',
-            companyName: undefined,
-            specialties: undefined,
-        };
-    });
-    const [userRole, setUserRole] = useState(userProfile.role);
-    const [isPaidMember, setIsPaidMember] = useState(userProfile.isPaidMember);
+    // Auth0 Hooks
+    const { user, isAuthenticated, isLoading: auth0Loading, loginWithRedirect, logout } = useAuth0();
+
+    // Derive authentication states from Auth0
+    const userId = isAuthenticated ? user?.sub : null; // Auth0's unique user ID (sub)
+    // IMPORTANT: User roles need to be set up as custom claims in Auth0 and added to the ID token.
+    // Example: user['http://localhost:3000/roles'] assuming 'http://localhost:3000/' is your namespace
+    const userRole = isAuthenticated
+        ? (user && user['https://your-app-domain.com/roles'] && user['https://your-app-domain.com/roles'][0]) || 'member' // <-- REMEMBER TO UPDATE YOUR_AUTH0_NAMESPACE
+        : 'loggedOut';
+    // For paid member status, you might store this in your Netlify DB and fetch it with the user profile,
+    // or as another custom claim from Auth0. For now, we'll keep it driven by the fetched userProfile.
+
+    const [userProfile, setUserProfileState] = useState(null); // Local state for current user's profile from your DB
+    const [isPaidMember, setIsPaidMember] = useState(false); // This will be set based on userProfile from DB
     const [currentPage, setCurrentPage] = useState('dashboard');
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true); // Overall app loading, combines Auth0 loading and data loading
     const [showPostProblemModal, setShowPostProblemModal] = useState(false);
-    const [showRegisterModal, setShowRegisterModal] = useState(false); // For general registration
-    const [selectedPlan, setSelectedPlan] = useState(null); // For membership plan selection
-    const [message, setMessage] = useState({ type: '', text: '' }); // Global app messages
+    const [showRegisterModal, setShowRegisterModal] = useState(false);
+    const [selectedPlan, setSelectedPlan] = useState(null);
+    const [message, setMessage] = useState({ type: '', text: '' });
 
-    // Global App Branding State
-    const [appName, setAppName] = useState('Mphakathi Online');
-    const [appLogo, setAppLogo] = useState('https://placehold.co/100x40/964b00/ffffff?text=Logo'); // Default placeholder logo
+    // Data from DB (replaced Firestore state)
+    const [problems, setProblems] = useState([]);
+    const [userProfiles, setUserProfiles] = useState({}); // Stores all user profiles for reference
+    const [pricingPlans, setPricingPlans] = useState([]);
+    const [appName, setAppName] = useState('Mphakathi Online'); // Default app name
+    const [appLogo, setAppLogo] = useState('https://placehold.co/100x40/964b00/ffffff?text=Logo'); // Default logo URL
 
+    // --- Data Fetching from Netlify Functions ---
 
-    // Mock data storage (in-memory, resets on refresh)
-    const [mockProblems, setMockProblems] = useState([
-        {
-            id: crypto.randomUUID(),
-            title: 'Leaky Faucet Repair',
-            description: 'My kitchen faucet has a steady drip, needs repair or replacement.',
-            category: 'Plumbing',
-            location: 'Pretoria',
-            estimatedBudget: 500,
-            requesterId: 'mock-member-alice', // Pre-existing user
-            status: 'open',
-            isApproved: true,
-            createdAt: new Date(Date.now() - 86400000 * 5),
-            quotes: [
-                { id: crypto.randomUUID(), providerId: 'mock-provider-alpha', providerName: 'Alpha Services', amount: 150, details: 'Standard repair, parts included.', status: 'pending', proposedStartDate: '2025-07-01', proposedEndDate: '2025-07-02', createdAt: new Date(Date.now() - 86400000 * 4) },
-                { id: crypto.randomUUID(), providerId: 'mock-provider-beta', providerName: 'Beta Fixers', amount: 120, details: 'Will inspect and fix, lowest price.', status: 'pending', proposedStartDate: '2025-07-03', proposedEndDate: '2025-07-03', createdAt: new Date(Date.now() - 86400000 * 3) },
-            ]
-        },
-        {
-            id: crypto.randomUUID(),
-            title: 'Garden Landscaping',
-            description: 'Need basic landscaping for a small backyard. Ideas welcome.',
-            category: 'Gardening',
-            location: 'Durban',
-            estimatedBudget: 2500,
-            requesterId: 'mock-member-bob', // Pre-existing user
-            status: 'open',
-            isApproved: true,
-            createdAt: new Date(Date.now() - 86400000 * 2),
-            quotes: [
-                 { id: crypto.randomUUID(), providerId: 'mock-provider-charlie', providerName: 'Charlie Gardens', amount: 500, details: 'Includes design and plant selection.', status: 'pending', proposedStartDate: '2025-07-10', proposedEndDate: '2025-07-15', createdAt: new Date(Date.now() - 86400000 * 1) },
-            ]
-        },
-         {
-            id: crypto.randomUUID(),
-            title: 'Broken Washing Machine',
-            description: 'Washing machine not spinning. Believe it is a motor issue.',
-            category: 'Appliance Repair',
-            location: 'Cape Town',
-            estimatedBudget: 800,
-            requesterId: 'mock-member-bob',
-            status: 'closed',
-            isApproved: true,
-            acceptedQuoteId: 'mock-quote-gamma',
-            createdAt: new Date(Date.now() - 86400000 * 10),
-            quotes: [
-                { id: crypto.randomUUID(), providerId: 'mock-provider-delta', providerName: 'Delta Appliances', amount: 300, details: 'Motor replacement cost.', status: 'pending', proposedStartDate: '2025-06-20', proposedEndDate: '2025-06-21', createdAt: new Date(Date.now() - 86400000 * 9) },
-                { id: 'mock-quote-gamma', providerId: 'mock-provider-epsilon', providerName: 'Epsilon Repairs', amount: 250, details: 'Quick diagnosis and repair.', status: 'accepted', proposedStartDate: '2025-06-22', proposedEndDate: '2025-06-22', createdAt: new Date(Date.now() - 86400000 * 8) },
-            ]
-        },
-    ]);
-
-    // Mock other user profiles for MemberDetailsModal and ProviderApproval
-    const [mockUserProfiles, setMockUserProfiles] = useState({
-        'mock-member-alice': {
-            uid: 'mock-member-alice', name: 'Alice Member', email: 'alice@example.com', phone: '071-123-4567', role: 'member', isPaidMember: true, bio: 'A mock user looking for help.', address: '456 Oak Avenue, Johannesburg'
-        },
-        'mock-member-bob': {
-            uid: 'mock-member-bob', name: 'Bob Member', email: 'bob@example.com', phone: '082-222-3333', role: 'member', isPaidMember: false, bio: 'Another mock user.', address: '789 Pine Street, Cape Town'
-        },
-        'mock-provider-alpha': {
-            uid: 'mock-provider-alpha', name: 'Alpha Services', email: 'alpha@example.com', phone: '060-111-2222', role: 'provider', isProviderApproved: true, companyName: 'Alpha Plumbing', specialties: 'Plumbing', bio: 'Expert plumbers in Gauteng.', address: '101 Pipe Rd, Pretoria'
-        },
-         'mock-provider-beta': {
-            uid: 'mock-provider-beta', name: 'Beta Fixers', email: 'beta@example.com', phone: '073-333-4444', role: 'provider', isProviderApproved: true, companyName: 'Beta General', specialties: 'General Handyman', bio: 'Reliable handymen for all your needs.', address: '202 Tool St, Durban'
-        },
-         'mock-provider-charlie': {
-            uid: 'mock-provider-charlie', name: 'Charlie Gardens', email: 'charlie@example.com', phone: '084-555-6666', role: 'provider', isProviderApproved: false, companyName: 'Charlie Landscaping', specialties: 'Landscaping', bio: 'Creative landscaping solutions.', address: '303 Green Ave, Cape Town'
-        },
-         'mock-provider-delta': {
-            uid: 'mock-provider-delta', name: 'Delta Appliances', email: 'delta@example.com', phone: '079-777-8888', role: 'provider', isProviderApproved: true, companyName: 'Delta Repairs', specialties: 'Appliance Repair', bio: 'Fast and affordable appliance repairs.', address: '404 Repair Ln, Johannesburg'
-        },
-         'mock-provider-epsilon': {
-            uid: 'mock-provider-epsilon', name: 'Epsilon Repairs', email: 'epsilon@example.com', phone: '081-999-0000', role: 'provider', isProviderApproved: true, companyName: 'Epsilon Tech', specialties: 'Electronics Repair', bio: 'Specializing in electronics repair.', address: '505 Circuit Rd, Pretoria'
-        },
-        'admin-user': {
-            uid: 'admin-user', name: 'Admin Account', email: 'admin@example.com', phone: '000-000-0000', role: 'admin', isProviderApproved: undefined, isPaidMember: undefined, bio: 'System administrator.', address: 'Admin HQ'
-        }
-    });
-
-    // Mock Pricing Plans - Moved to central state for admin editing
-    const [mockPricingPlans, setMockPricingPlans] = useState([
-        {
-            id: 'bronze-plan', // Added unique ID for easier management
-            name: 'Bronze',
-            price: 'R50/month', // Updated to match plan codes.PNG
-            rawPrice: 50, // Added for numerical comparisons if needed
-            interval: 'monthly',
-            features: [
-                'Post up to 5 problems',
-                'View basic problem details',
-                'Community support'
-            ],
-            paystackLink: 'https://paystack.shop/pay/PLN_ot4wcmec30yw311', // Updated with actual plan code
-            planCode: 'PLN_ot4wcmec30yw311', // Added plan code
-        },
-        {
-            id: 'silver-plan',
-            name: 'Silver',
-            price: 'R150/month', // Updated to match plan codes.PNG
-            rawPrice: 150,
-            interval: 'monthly',
-            features: [
-                'Unlimited problem posts',
-                'View all problem details',
-                'Submit and manage quotes',
-                'Priority support'
-            ],
-            paystackLink: 'https://paystack.shop/pay/PLN_9zom3j5yjqjox10', // Updated with actual plan code
-            planCode: 'PLN_9zom3j5yjqjox10', // Added plan code
-        },
-        {
-            id: 'gold-plan',
-            name: 'Gold',
-            price: 'R300/month', // Updated to match plan codes.PNG
-            rawPrice: 300,
-            interval: 'monthly',
-            features: [
-                'All Silver features',
-                'Advanced analytics',
-                'Dedicated account manager',
-                'Early access to features'
-            ],
-            paystackLink: 'https://paystack.shop/pay/PLN_2cun96f18ckdlzd', // Updated with actual plan code
-            planCode: 'PLN_2cun96f18ckdlzd', // Added plan code
-        },
-        {
-            id: 'platinum-plan',
-            name: 'Platinum',
-            price: 'R500/month', // Updated to match plan codes.PNG
-            rawPrice: 500,
-            interval: 'monthly',
-            features: [
-                'All Gold features',
-                'Premium partner listings',
-                'Exclusive workshops',
-                'API access'
-            ],
-            paystackLink: 'https://paystack.shop/pay/PLN_zy6223r71ftmy11', // Updated with actual plan code
-            planCode: 'PLN_zy6223r71ftmy11', // Added plan code
-        },
-    ]);
-
-
-    // Effect to initialize user profile on first load (e.g., if starting logged out)
-    useEffect(() => {
-        if (userProfile.uid === '') { // Only if uid is initially empty (loggedOut state)
-            const newUserId = crypto.randomUUID();
-            setUserId(newUserId);
-            setUserProfile(prev => ({ ...prev, uid: newUserId }));
-            // Add this new user to mockUserProfiles
-            setMockUserProfiles(prev => ({
-                ...prev,
-                [newUserId]: { ...userProfile, uid: newUserId }
-            }));
-        } else {
-             // Ensure the current userProfile is always in mockUserProfiles
-            setMockUserProfiles(prev => ({
-                ...prev,
-                [userId]: { ...prev[userId], ...userProfile, uid: userId }
-            }));
-        }
-    }, [userId]); // Only re-run if userId changes (initial setup)
-
-    // Handle posting new problem (moved from ProblemListPage)
-    const handlePostProblem = (problemData) => {
-        const newProblem = {
-            id: crypto.randomUUID(),
-            title: problemData.title,
-            description: problemData.description,
-            category: problemData.category,
-            location: problemData.location,
-            estimatedBudget: parseFloat(problemData.estimatedBudget),
-            requesterId: userId,
-            status: 'open',
-            isApproved: false, // New problems require admin approval
-            createdAt: new Date(),
-            quotes: [] // Initialize with empty quotes array
-        };
-        setMockProblems(prevProblems => [newProblem, ...prevProblems]);
-        setShowPostProblemModal(false); // Close modal on save
-        setMessage({ type: 'success', text: 'Problem posted successfully! Awaiting admin approval.' });
-    };
-
-    // Generic registration handler
-    const handleRegister = (newUserData, roleType, isPaid = false) => {
-        const newUid = crypto.randomUUID();
-        const newUserProfile = {
-            uid: newUid,
-            name: newUserData.name,
-            email: newUserData.email,
-            phone: newUserData.phone,
-            role: roleType,
-            isProviderApproved: roleType === 'provider' ? false : undefined, // Providers need approval
-            isPaidMember: isPaid,
-            bio: newUserData.bio || '',
-            address: newUserData.address || '',
-            companyName: newUserData.companyName || undefined,
-            specialties: newUserData.specialties || undefined,
-        };
-
-        setMockUserProfiles(prev => ({
-            ...prev,
-            [newUid]: newUserProfile
-        }));
-        setUserId(newUid);
-        setUserProfile(newUserProfile);
-        setUserRole(newUserProfile.role);
-        setIsPaidMember(newUserProfile.isPaidMember);
-        setMessage({ type: 'success', text: `Welcome, ${newUserData.name}! You are now registered as a ${roleType}.` });
-        setCurrentPage('dashboard');
-        setShowRegisterModal(false);
-    };
-
-    // Handle becoming a paid member after selecting a plan and filling form
-    const handleBecomePaidMember = (newUserData, selectedPlanDetails) => {
-        // Find the user if they already exist (e.g., free member upgrading)
-        let existingUser = mockUserProfiles[userId];
-
-        // If the current user is logged out, create a new one based on form data
-        // If current user is a free member, update their profile
-        const newUid = userRole === 'loggedOut' ? crypto.randomUUID() : userId;
-
-        const updatedProfile = {
-            ...existingUser, // Start with existing data if available
-            uid: newUid,
-            name: newUserData.name || existingUser?.name || `New Member ${newUid.substring(0,4)}`,
-            email: newUserData.email || existingUser?.email || `newmember-${newUid.substring(0,4)}@example.com`,
-            phone: newUserData.phone || existingUser?.phone || '',
-            role: 'member', // Always 'member' after this flow
-            isPaidMember: true, // Key change: now a paid member
-            bio: newUserData.bio || existingUser?.bio || '',
-            address: newUserData.address || existingUser?.address || '',
-            // Clear provider-specific fields if they were in provider registration flow and switching to member
-            companyName: undefined,
-            specialties: undefined,
-            isProviderApproved: undefined,
-        };
-
-        setMockUserProfiles(prev => ({
-            ...prev,
-            [newUid]: updatedProfile
-        }));
-        setUserId(newUid);
-        setUserProfile(updatedProfile);
-        setUserRole('member');
-        setIsPaidMember(true);
-        setSelectedPlan(null); // Clear selected plan
-        setMessage({ type: 'success', text: `Congratulations! You are now a Paid Member (${selectedPlanDetails.name}).` });
-        setCurrentPage('problems'); // Redirect to problem listings after successful payment
-    };
-
-
-    const handleLoginAs = (role) => {
-        let newUserId;
-        let newProfile;
-
-        if (role === 'loggedOut') {
-            newUserId = crypto.randomUUID(); // Give a new ID for a guest session
-            newProfile = {
-                uid: '', // No actual UID for logged out guest, set to empty
-                name: 'Guest User',
-                email: '',
-                phone: '',
-                role: 'loggedOut',
-                isProviderApproved: false,
-                isPaidMember: false,
-                bio: '',
-                address: ''
+    // Generic fetch wrapper
+    const fetchData = async (url, method = 'GET', body = null) => {
+        // We'll manage overall loading state later by combining this with auth0Loading
+        try {
+            const options = {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    // Include Authorization header if your Netlify Functions are secured
+                    ...(isAuthenticated && user?.__raw && {
+                        Authorization: `Bearer ${user.__raw}`, // Pass the ID token or access token
+                    }),
+                },
             };
-        } else if (role === 'admin') {
-            newUserId = 'admin-user';
-            newProfile = mockUserProfiles['admin-user'];
-        } else { // member or provider (existing mock users for quick testing)
-            if (role === 'member') {
-                // Pick one of the mock members
-                newUserId = isPaidMember ? 'mock-member-alice' : 'mock-member-bob';
-                newProfile = mockUserProfiles[newUserId];
-            } else if (role === 'provider') {
-                // Pick one of the mock providers
-                newUserId = Math.random() < 0.5 ? 'mock-provider-alpha' : 'mock-provider-charlie';
-                newProfile = mockUserProfiles[newUserId];
+            if (body) {
+                options.body = JSON.stringify(body);
             }
+
+            const response = await fetch(`${API_BASE_URL}${url}`, options);
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+            }
+            return await response.json();
+        } catch (error) {
+            console.error(`Error fetching from ${url}:`, error);
+            setMessage({ type: 'error', text: `Data operation failed: ${error.message}` });
+            throw error; // Re-throw to be caught by specific handlers
         }
-        setUserId(newUserId);
-        setUserProfile(newProfile);
-        setUserRole(newProfile.role);
-        setIsPaidMember(newProfile.isPaidMember || false); // Ensure it's boolean
-        setCurrentPage('dashboard');
-        setMessage({ type: '', text: '' }); // Clear any previous messages
     };
 
+
+    // Fetch All User Profiles
+    const fetchUserProfiles = async () => {
+        try {
+            const data = await fetchData('/get-user-profiles');
+            const profilesMap = {};
+            if (Array.isArray(data)) {
+                data.forEach(profile => {
+                    profilesMap[profile.uid] = {
+                        ...profile,
+                        isProviderApproved: profile.is_provider_approved,
+                        isPaidMember: profile.is_paid_member,
+                        companyName: profile.company_name,
+                        createdAt: new Date(profile.created_at),
+                        updatedAt: profile.updated_at ? new Date(profile.updated_at) : null,
+                    };
+                });
+            }
+            setUserProfiles(profilesMap);
+            console.log("User profiles fetched from Netlify DB.");
+        } catch (error) {
+            console.error('Error fetching user profiles:', error);
+        }
+    };
+
+    // Fetch Problems
+    const fetchProblems = async () => {
+        try {
+            const data = await fetchData('/get-problems');
+            const formattedProblems = data.map(problem => ({
+                ...problem,
+                estimatedBudget: parseFloat(problem.estimated_budget),
+                requesterId: problem.requester_id,
+                isApproved: problem.is_approved,
+                acceptedQuoteId: problem.accepted_quote_id,
+                createdAt: new Date(problem.created_at),
+                quotes: problem.quotes && typeof problem.quotes === 'string' ? JSON.parse(problem.quotes) : (Array.isArray(problem.quotes) ? problem.quotes : []),
+            }));
+            setProblems(formattedProblems);
+            console.log("Problems fetched from Netlify DB.");
+        } catch (error) {
+            console.error('Error fetching problems:', error);
+        }
+    };
+
+    // Fetch Pricing Plans
+    const fetchPricingPlans = async () => {
+        try {
+            const data = await fetchData('/get-pricing-plans');
+            const formattedPlans = data.map(plan => ({
+                ...plan,
+                rawPrice: parseFloat(plan.raw_price),
+                features: Array.isArray(plan.features) ? plan.features : (plan.features ? JSON.parse(plan.features) : []),
+                createdAt: new Date(plan.created_at),
+            }));
+            setPricingPlans(formattedPlans);
+            console.log("Pricing plans fetched from Netlify DB.");
+        } catch (error) {
+            console.error('Error fetching pricing plans:', error);
+        }
+    };
+
+    // Fetch Branding
+    const fetchBranding = async () => {
+        try {
+            const data = await fetchData('/get-branding');
+            setAppName(data.app_name || 'Mphakathi Online');
+            setAppLogo(data.app_logo_url || 'https://placehold.co/100x40/964b00/ffffff?text=Logo');
+            console.log("Branding config fetched from Netlify DB.");
+        } catch (error) {
+            console.error('Error fetching branding:', error);
+        }
+    };
+
+    // Main data loading effect
+    useEffect(() => {
+        const loadAppData = async () => {
+            setLoading(true); // Start overall loading indicator
+
+            // Fetch core application data
+            await fetchUserProfiles();
+            await fetchProblems();
+            await fetchPricingPlans();
+            await fetchBranding();
+
+            setLoading(false); // End overall loading indicator
+        };
+
+        // Only load app data once Auth0 has determined authentication state
+        if (!auth0Loading) {
+            loadAppData();
+        }
+    }, [auth0Loading]); // Re-run when Auth0 loading state changes (i.e., after initial load)
+
+
+    // Effect to set user profile and role based on Auth0 user object and fetched profiles
+    useEffect(() => {
+        if (isAuthenticated && user && Object.keys(userProfiles).length > 0) {
+            const currentUserProfile = userProfiles[user.sub];
+            if (currentUserProfile) {
+                setUserProfileState(currentUserProfile);
+                setIsPaidMember(currentUserProfile.isPaidMember);
+                // The userRole is primarily driven by Auth0 claims if available,
+                // otherwise fall back to fetched profile or a default.
+                // Ensure your Auth0 setup sends roles in the ID token.
+                const auth0Role = (user['https://your-app-domain.com/roles'] && user['https://your-app-domain.com/roles'][0]) || currentUserProfile.role; // <-- REMEMBER TO UPDATE YOUR_AUTH0_NAMESPACE
+                setCurrentPage('dashboard'); // Redirect to dashboard after login
+            } else {
+                // User logged in via Auth0 but no profile in your DB.
+                // This might indicate a new user registration flow is needed.
+                // For this demo, let's set a minimal profile or prompt registration.
+                setMessage({type: 'warning', text: 'Auth0 user found, but no profile in DB. Please register.'});
+                setCurrentPage('register'); // Or show a registration modal
+                setUserProfileState({
+                    uid: user.sub,
+                    name: user.name || user.email,
+                    email: user.email,
+                    role: 'member', // Default new users to member
+                    isPaidMember: false,
+                });
+                setShowRegisterModal(true); // Show registration modal for new Auth0 users
+            }
+        } else if (!isAuthenticated && !auth0Loading) {
+            // User is logged out and Auth0 is done loading
+            // setUserId(null); // This was previously set by Auth0 in a different way, now userId is derived.
+            setUserProfileState(null); // Clear user profile
+            setIsPaidMember(false);
+            setCurrentPage('dashboard'); // Go to dashboard for logged out users
+            setMessage({ type: 'info', text: 'You are currently logged out.' });
+        }
+    }, [isAuthenticated, user, auth0Loading, userProfiles]); // Dependencies for this effect
+
+
+    // --- Data Manipulation Functions (now interacting with Netlify Functions) ---
+
+    // Update User Profile (used by ProfilePage and registration flows)
+    const updateUserProfile = async (uid, updates) => {
+        try {
+            const dbUpdates = {
+                uid: uid,
+                name: updates.name,
+                email: updates.email,
+                phone: updates.phone,
+                bio: updates.bio,
+                address: updates.address,
+                role: updates.role,
+                is_provider_approved: updates.isProviderApproved,
+                is_paid_member: updates.isPaidMember,
+                company_name: updates.companyName,
+                specialties: updates.specialties,
+            };
+
+            const data = await fetchData('/save-user-profile', 'POST', dbUpdates);
+            const updatedLocalProfile = {
+                ...data,
+                isProviderApproved: data.is_provider_approved,
+                isPaidMember: data.is_paid_member,
+                companyName: data.company_name,
+                createdAt: new Date(data.created_at),
+                updatedAt: data.updated_at ? new Date(data.updated_at) : null,
+            };
+            setUserProfileState(updatedLocalProfile);
+            setUserProfiles(prev => ({ ...prev, [uid]: updatedLocalProfile }));
+            setMessage({ type: 'success', text: 'Profile updated successfully!' });
+        } catch (error) {
+            console.error("Error updating user profile:", error);
+            setMessage({ type: 'error', text: `Failed to update profile: ${error.message}` });
+        }
+    };
+
+    // Generic registration handler (now uses Netlify Functions)
+    // This will be called for new Auth0 users to create their profile in your DB
+    const handleRegister = async (newUserData, roleType, isPaid = false) => {
+        try {
+            // newUserData.uid should come from Auth0 user.sub now
+            if (!newUserData.uid) {
+                throw new Error("User ID (UID) is required for registration from Auth0.");
+            }
+
+            const newUserProfileData = {
+                uid: newUserData.uid, // Use Auth0's user.sub
+                name: newUserData.name,
+                email: newUserData.email,
+                phone: newUserData.phone,
+                address: newUserData.address,
+                bio: newUserData.bio,
+                role: roleType,
+                isProviderApproved: roleType === 'provider' ? false : undefined,
+                isPaidMember: isPaid,
+                companyName: role === 'provider' ? newUserData.companyName : undefined,
+                specialties: role === 'provider' ? newUserData.specialties : undefined,
+            };
+
+            await updateUserProfile(newUserData.uid, newUserProfileData);
+            setMessage({ type: 'success', text: `Welcome, ${newUserData.name}! You are now registered as a ${roleType}.` });
+            setCurrentPage('dashboard');
+            setShowRegisterModal(false);
+        } catch (error) {
+            console.error("Error during registration:", error);
+            setMessage({ type: 'error', text: `Registration failed: ${error.message}` });
+        }
+    };
+
+    // Handle posting new problem
+    const handlePostProblem = async (problemData) => {
+        try {
+            if (!userId) { // Ensure user is logged in to post problem
+                setMessage({type: 'error', text: 'You must be logged in to post a problem.'});
+                return;
+            }
+            await fetchData('/post-problem', 'POST', {
+                title: problemData.title,
+                description: problemData.description,
+                category: problemData.category,
+                location: problemData.location,
+                estimatedBudget: parseFloat(problemData.estimatedBudget),
+                requesterId: userId,
+                quotes: []
+            });
+            await fetchProblems();
+            setShowPostProblemModal(false);
+            setMessage({ type: 'success', text: 'Problem posted successfully! Awaiting admin approval.' });
+        } catch (error) {
+            console.error("Error posting problem:", error);
+            setMessage({ type: 'error', text: `Failed to post problem: ${error.message}` });
+        }
+    };
+
+    // Handle updating a problem (e.g., status, quotes)
+    const updateProblemInApp = async (problemId, updates) => {
+        try {
+            const dbUpdates = {};
+            for (const key in updates) {
+                let dbKey = key;
+                if (key === 'isApproved') dbKey = 'is_approved';
+                else if (key === 'acceptedQuoteId') dbKey = 'accepted_quote_id';
+                else if (key === 'requesterId') dbKey = 'requester_id';
+                else if (key === 'estimatedBudget') dbKey = 'estimated_budget';
+                else if (key === 'createdAt') dbKey = 'created_at';
+                else if (key === 'quotes') dbKey = 'quotes';
+
+                if (key === 'quotes') {
+                    dbUpdates[dbKey] = JSON.stringify(updates[key]);
+                } else if (dbKey.includes('Id') || dbKey.includes('Budget')) {
+                    dbUpdates[dbKey] = updates[key];
+                } else {
+                    dbUpdates[dbKey] = updates[key];
+                }
+            }
+
+            await fetchData('/update-problem', 'PUT', { id: problemId, updates: dbUpdates });
+            await fetchProblems();
+            setMessage({ type: 'success', text: 'Problem updated successfully!' });
+        } catch (error) {
+            console.error("Error updating problem:", error);
+            setMessage({ type: 'error', text: `Failed to update problem: ${error.message}` });
+        }
+    };
+
+    // Handle deleting a problem
+    const deleteProblemInApp = async (problemId) => {
+        try {
+            await fetchData('/delete-problem', 'DELETE', { id: problemId });
+            await fetchProblems();
+            setMessage({ type: 'success', text: 'Problem deleted successfully!' });
+        } catch (error) {
+            console.error("Error deleting problem:", error);
+            setMessage({ type: 'error', text: `Failed to delete problem: ${error.message}` });
+        }
+    };
+
+    // Handle adding/updating a pricing plan
+    const savePricingPlanInApp = async (planData) => {
+        try {
+            const dbPlanData = {
+                id: planData.id,
+                name: planData.name,
+                price: planData.price,
+                raw_price: planData.rawPrice,
+                interval: planData.interval,
+                plan_code: planData.planCode,
+                features: planData.features,
+            };
+            await fetchData('/save-pricing-plan', 'POST', dbPlanData);
+            await fetchPricingPlans();
+            setMessage({ type: 'success', text: planData.id ? `Plan "${planData.name}" updated successfully!` : `New plan "${planData.name}" added successfully!` });
+        } catch (error) {
+            console.error("Error saving pricing plan:", error);
+            setMessage({ type: 'error', text: `Failed to save pricing plan: ${error.message}` });
+        }
+    };
+
+    // Handle deleting a pricing plan
+    const deletePricingPlanInApp = async (planId, planName) => {
+        try {
+            await fetchData('/delete-pricing-plan', 'DELETE', { id: planId });
+            await fetchPricingPlans();
+            setMessage({ type: 'success', text: `Plan "${planName}" deleted successfully!` });
+        } catch (error) {
+            console.error("Error deleting pricing plan:", error);
+            setMessage({ type: 'error', text: `Failed to delete pricing plan: ${error.message}` });
+        }
+    };
+
+    // Handle updating branding (app name and logo)
+    const updateBrandingInApp = async (newAppName, newAppLogo) => {
+        try {
+            await fetchData('/save-branding', 'POST', { appName: newAppName, appLogo: newAppLogo });
+            setAppName(newAppName);
+            setAppLogo(newAppLogo);
+            setMessage({ type: 'success', text: 'Branding updated successfully!' });
+        } catch (error) {
+            console.error("Error updating branding:", error);
+            setMessage({ type: 'error', text: `Failed to update branding: ${error.message}` });
+        }
+    };
+
+    // --- Authentication Actions (Auth0 Integrated) ---
+    // The handleLoginAs function is now completely replaced by Auth0's loginWithRedirect and logout.
+    const handleLogin = () => {
+        loginWithRedirect(); // Redirects to Auth0 login page
+    };
+
+    const handleLogout = () => {
+        logout({ logoutParams: { returnTo: window.location.origin } }); // Redirects to Auth0 logout and then back to your app
+    };
 
     // Determine the header title and status based on role
-    const headerTitle = userProfile?.name || 'Guest';
+    const headerTitle = userProfile?.name || (isAuthenticated ? user?.name || user?.email : 'Guest');
     let statusText = '';
     let statusColorClass = '';
 
-    if (userRole === 'loggedOut') {
+    const displayUserRole = isAuthenticated ? userRole : 'loggedOut'; // Use derived userRole from Auth0 or default 'loggedOut'
+
+    if (displayUserRole === 'loggedOut') {
         statusText = 'Logged Out';
         statusColorClass = 'bg-gray-100 text-gray-800';
-    } else if (userRole === 'admin') {
+    } else if (displayUserRole === 'admin') {
         statusText = 'Administrator';
         statusColorClass = 'bg-purple-100 text-purple-800';
-    } else if (userRole === 'provider') {
+    } else if (displayUserRole === 'provider') {
         statusText = userProfile?.isProviderApproved ? 'Approved Provider' : 'Pending Approval';
         statusColorClass = userProfile?.isProviderApproved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
     } else { // member
@@ -394,19 +488,43 @@ const App = () => {
         statusColorClass = isPaidMember ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800';
     }
 
+    // Overall loading state combines Auth0 loading and app data loading
+    if (auth0Loading || loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-100">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-[#964b00] mx-auto mb-4"></div>
+                    <p className="text-gray-700 text-lg">Loading application data...</p>
+                </div>
+            </div>
+        );
+    }
+
+    // Use the usePermissions hook
+    const { canAccess } = usePermissions();
 
     return (
         <AppContext.Provider value={{
-            userId, userProfile, setUserProfile, userRole, setUserRole, isPaidMember, setIsPaidMember,
-            mockProblems, setMockProblems, mockUserProfiles, setMockUserProfiles,
-            mockPricingPlans, setMockPricingPlans, // Provide pricing plans
-            appName, setAppName, // Provide app name state
-            appLogo, setAppLogo, // Provide app logo state
+            userId, userProfile, setUserProfile: updateUserProfile, userRole: displayUserRole, isPaidMember, setIsPaidMember,
+            problems, setProblems: updateProblemInApp,
+            userProfiles,
+            pricingPlans, setPricingPlans: savePricingPlanInApp,
+            appName, setAppName,
+            appLogo, setAppLogo,
             setShowPostProblemModal,
-            setMessage, // Provide setMessage globally
-            handleRegister, // Provide general registration handler
-            handleBecomePaidMember, // Provide paid membership handler
-            setSelectedPlan, // Provide setter for selected plan
+            setMessage,
+            handleRegister,
+            handleBecomePaidMember: updateUserProfile,
+            setSelectedPlan,
+            updateProblemInFirestore: updateProblemInApp,
+            deleteProblemFromFirestore: deleteProblemInApp,
+            deletePricingPlanFromFirestore: deletePricingPlanInApp,
+            savePricingPlanToFirestore: savePricingPlanInApp,
+            updateBrandingInFirestore: updateBrandingInApp,
+            loginWithRedirect, // Expose Auth0 login
+            logout, // Expose Auth0 logout
+            isAuthenticated, // Expose Auth0 isAuthenticated
+            user, // Expose Auth0 user object
         }}>
             <div className="min-h-screen flex bg-gray-100 font-sans">
                 {/* Sidebar */}
@@ -417,82 +535,15 @@ const App = () => {
                                 src={appLogo}
                                 alt={`${appName} Logo`}
                                 className="mx-auto mb-4 w-24 h-auto rounded-md"
-                                onError={(e) => { e.target.onerror = null; e.target.src="https://placehold.co/100x40/964b00/ffffff?text=Logo"; }} // Fallback
+                                onError={(e) => { e.target.onerror = null; e.target.src="https://placehold.co/100x40/964b00/ffffff?text=Logo"; }}
                             />
                         )}
                         <h2 className="text-2xl font-bold">
                             {appName}
                         </h2>
-                        <p className="text-sm text-gray-200 mt-1">ID: {userId || 'N/A'}</p> {/* Display N/A for logged out */}
-                         <div className="mt-4 flex flex-col space-y-2">
-                            <label className="text-sm text-gray-200">Switch User:</label>
-                            <select
-                                value={userRole === 'loggedOut' ? 'loggedOut' : userProfile.uid} // Use UID for specific mock users
-                                onChange={(e) => {
-                                    if (e.target.value === 'loggedOut') {
-                                        handleLoginAs('loggedOut');
-                                    } else if (e.target.value === 'admin-user') {
-                                        handleLoginAs('admin');
-                                    } else if (e.target.value.startsWith('mock-member')) {
-                                        setUserId(e.target.value);
-                                        setUserProfile(mockUserProfiles[e.target.value]);
-                                        setUserRole('member');
-                                        setIsPaidMember(mockUserProfiles[e.target.value].isPaidMember);
-                                        setCurrentPage('dashboard');
-                                    } else if (e.target.value.startsWith('mock-provider')) {
-                                         setUserId(e.target.value);
-                                        setUserProfile(mockUserProfiles[e.target.value]);
-                                        setUserRole('provider');
-                                        setCurrentPage('dashboard');
-                                    } else {
-                                        // Handle newly registered dynamic users
-                                        const foundUser = Object.values(mockUserProfiles).find(u => u.uid === e.target.value);
-                                        if (foundUser) {
-                                            setUserId(foundUser.uid);
-                                            setUserProfile(foundUser);
-                                            setUserRole(foundUser.role);
-                                            setIsPaidMember(foundUser.isPaidMember || false);
-                                            setCurrentPage('dashboard');
-                                        } else {
-                                            handleLoginAs(e.target.value); // Fallback to generic login if not static mock user
-                                        }
-                                    }
-                                }}
-                                className="p-2 rounded-md bg-[#7a3d00] text-white text-sm"
-                            >
-                                <option value="loggedOut">Logged Out</option>
-                                <option value="mock-member-alice">Member (Paid - Alice)</option>
-                                <option value="mock-member-bob">Member (Free - Bob)</option>
-                                <option value="mock-provider-alpha">Provider (Approved - Alpha)</option>
-                                <option value="mock-provider-charlie">Provider (Pending - Charlie)</option>
-                                <option value="admin-user">Admin</option>
-                                {Object.values(mockUserProfiles) // Add dynamically registered users
-                                    .filter(u => u.uid !== 'mock-member-alice' && u.uid !== 'mock-member-bob' && u.uid !== 'mock-provider-alpha' && u.uid !== 'mock-provider-charlie' && u.uid !== '' && u.role !== 'admin')
-                                    .map(u => (
-                                        <option key={u.uid} value={u.uid}>
-                                            {u.name} ({u.role} - {u.isPaidMember ? 'Paid' : u.role === 'member' ? 'Free' : (u.isProviderApproved ? 'Approved' : 'Pending')})
-                                        </option>
-                                    ))
-                                }
-                            </select>
-                            {userRole === 'member' && (
-                                <div className="flex items-center mt-2">
-                                    <input
-                                        type="checkbox"
-                                        id="paidMemberToggle"
-                                        checked={isPaidMember}
-                                        onChange={(e) => {
-                                            setIsPaidMember(e.target.checked);
-                                            setUserProfile(prev => ({ ...prev, isPaidMember: e.target.checked }));
-                                            setMessage({ type: 'info', text: 'Membership status updated (demo only). Upgrade via Pricing to persist.' });
-                                        }}
-                                        className="mr-2"
-                                        disabled // Disable in-app toggle for demo, encourage pricing page
-                                    />
-                                    <label htmlFor="paidMemberToggle" className="text-sm text-gray-200">Paid Member</label>
-                                </div>
-                            )}
-                        </div>
+                        {/* Display Auth0 user email if logged in */}
+                        {isAuthenticated && user?.email && <p className="text-sm text-gray-200 mt-1">Logged in as: {user.email}</p>}
+                        {/* Removed the "Switch User" dropdown as Auth0 manages login */}
                     </div>
                     <nav className="flex-1 mt-4">
                         <ul>
@@ -507,18 +558,18 @@ const App = () => {
                                     Dashboard
                                 </button>
                             </li>
-                            {userRole === 'loggedOut' && (
+                            {!isAuthenticated && (
                                 <li>
                                     <button
-                                        onClick={() => setShowRegisterModal(true)}
+                                        onClick={handleLogin} // Use Auth0 login
                                         className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 hover:bg-[#7a3d00] text-gray-100`}
                                     >
                                         <KeyIcon size={20} className="mr-3" />
-                                        Register
+                                        Login / Register
                                     </button>
                                 </li>
                             )}
-                            {userRole !== 'loggedOut' && (
+                            {canAccess(['member', 'provider', 'admin']) && ( // Everyone logged in can view profile
                                 <li>
                                     <button
                                         onClick={() => setCurrentPage('profile')}
@@ -531,1599 +582,390 @@ const App = () => {
                                     </button>
                                 </li>
                             )}
-                            <li>
-                                <button
-                                    onClick={() => setCurrentPage('problems')}
-                                    className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
-                                        currentPage === 'problems' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
-                                    }`}
-                                >
-                                    <FileTextIcon size={20} className="mr-3" />
-                                    Problem List
-                                </button>
-                            </li>
-                            {userRole === 'provider' && (
+                            {canAccess('member') && ( // Only members can post problems
                                 <li>
                                     <button
-                                        onClick={() => setCurrentPage('quotes')}
-                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
-                                            currentPage === 'quotes' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
-                                        }`}
+                                        onClick={() => setShowPostProblemModal(true)}
+                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 hover:bg-[#7a3d00] text-gray-100`}
                                     >
-                                        <PackageIcon size={20} className="mr-3" />
-                                        My Quotes
+                                        <PlusCircleIcon size={20} className="mr-3" />
+                                        Post Problem
                                     </button>
                                 </li>
                             )}
-                            {userRole === 'member' && (
-                                <li>
-                                    <button
-                                        onClick={() => setCurrentPage('my-requests')}
-                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
-                                            currentPage === 'my-requests' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
-                                        }`}
-                                    >
-                                        <CalendarIcon size={20} className="mr-3" />
-                                        My Requests
-                                    </button>
-                                </li>
+                            {canAccess('provider') && ( // Only providers see provider dashboard and pricing
+                                <>
+                                    <li>
+                                        <button
+                                            onClick={() => setCurrentPage('provider-dashboard')}
+                                            className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
+                                                currentPage === 'provider-dashboard' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
+                                            }`}
+                                        >
+                                            <BriefcaseIcon size={20} className="mr-3" />
+                                            Provider Dashboard
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button
+                                            onClick={() => setCurrentPage('pricing')}
+                                            className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
+                                                currentPage === 'pricing' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
+                                            }`}
+                                        >
+                                            <DollarSignIcon size={20} className="mr-3" />
+                                            Pricing
+                                        </button>
+                                    </li>
+                                </>
                             )}
-                            {userRole === 'admin' && (
-                                <li>
-                                    <button
-                                        onClick={() => setCurrentPage('admin-tools')}
-                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
-                                            currentPage === 'admin-tools' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
-                                        }`}
-                                    >
-                                        <ShieldCheckIcon size={20} className="mr-3" />
-                                        Admin Tools
-                                    </button>
-                                </li>
+                            {canAccess('admin') && ( // Only admins see admin panel and branding settings
+                                <>
+                                    <li>
+                                        <button
+                                            onClick={() => setCurrentPage('admin-panel')}
+                                            className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
+                                                currentPage === 'admin-panel' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
+                                            }`}
+                                        >
+                                            <ShieldCheckIcon size={20} className="mr-3" />
+                                            Admin Panel
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button
+                                            onClick={() => setCurrentPage('branding-settings')}
+                                            className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
+                                                currentPage === 'branding-settings' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
+                                            }`}
+                                        >
+                                            <PaintbrushIcon size={20} className="mr-3" />
+                                            Branding Settings
+                                        </button>
+                                    </li>
+                                </>
                             )}
-                            {userRole !== 'loggedOut' && (
+                            {isAuthenticated && ( // Logout is available if authenticated
                                 <li>
                                     <button
-                                        onClick={() => setCurrentPage('settings')}
-                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 ${
-                                            currentPage === 'settings' ? 'bg-[#b3641a] text-white' : 'hover:bg-[#7a3d00] text-gray-100'
-                                        }`}
+                                        onClick={handleLogout} // Use Auth0 logout
+                                        className={`flex items-center w-full px-4 py-3 text-lg rounded-md transition-colors duration-200 hover:bg-[#7a3d00] text-gray-100`}
                                     >
-                                        <SettingsIcon size={20} className="mr-3" />
-                                        Settings
+                                        <LogOutIcon size={20} className="mr-3" />
+                                        Logout
                                     </button>
                                 </li>
                             )}
                         </ul>
                     </nav>
-                    {userRole !== 'loggedOut' && (
-                        <div className="p-4 md:p-6 border-t border-[#b3641a]">
-                            <button
-                                onClick={() => handleLoginAs('loggedOut')}
-                                className="flex items-center w-full px-4 py-3 text-lg text-red-300 rounded-md hover:bg-red-700 transition-colors duration-200"
-                            >
-                                <LogOutIcon size={20} className="mr-3" />
-                                Log Out
-                            </button>
-                        </div>
-                    )}
                 </aside>
 
-                {/* Main content */}
-                <div className="flex-1 flex flex-col">
-                    <header className="bg-white shadow p-4 md:p-6 flex items-center justify-between">
-                        <h1 className="text-2xl font-bold text-gray-800">
-                            Welcome, {headerTitle}!
+                {/* Main Content Area */}
+                <main className="flex-1 p-6 bg-gray-100 overflow-auto">
+                    {message.text && (
+                        <div
+                            className={`mb-4 p-3 rounded-md text-white ${
+                                message.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+                            }`}
+                            role="alert"
+                        >
+                            {message.text}
+                        </div>
+                    )}
+                    <header className="flex justify-between items-center mb-6">
+                        <h1 className="text-3xl font-bold text-gray-800 capitalize">
+                            {currentPage.replace('-', ' ')}
                         </h1>
-                        <span className={`px-3 py-1 rounded-full text-sm font-semibold ${statusColorClass}`}>
-                            {statusText}
-                        </span>
+                        <div className="flex items-center space-x-4">
+                            <span className={`px-3 py-1 rounded-full text-sm font-semibold ${statusColorClass}`}>
+                                {statusText}
+                            </span>
+                        </div>
                     </header>
-                    <main className="flex-1 p-4 md:p-8 overflow-y-auto">
-                        {message.text && (
-                            <div className={`p-3 mb-4 rounded-md text-sm ${message.type === 'success' ? 'bg-green-100 text-green-700' : message.type === 'error' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
-                                {message.text}
-                            </div>
-                        )}
-                        {(() => {
-                            switch (currentPage) {
-                                case 'dashboard':
-                                    return userRole === 'provider' ?
-                                        <ProviderDashboardPage userProfile={userProfile} onNavigate={setCurrentPage} /> :
-                                        <MemberDashboardPage userProfile={userProfile} onNavigate={setCurrentPage} />;;
-                                case 'profile':
-                                    return <ProfilePage />;
-                                case 'problems':
-                                    return <ProblemListPage onNavigate={setCurrentPage} />;
-                                case 'quotes':
-                                    return userRole === 'provider' ? <MyQuotesPage /> : null;
-                                case 'my-requests':
-                                    return userRole === 'member' ? <MyRequestsPage /> : null;
-                                case 'admin-tools':
-                                    return userRole === 'admin' ? <AdminToolsPage onNavigate={setCurrentPage} /> : null;
-                                case 'admin-pricing':
-                                    return userRole === 'admin' ? <AdminPricingPage /> : null; // New admin page
-                                case 'admin-branding': // New page for admin branding
-                                    return userRole === 'admin' ? <AdminBrandingPage /> : null;
-                                case 'settings':
-                                    return userRole !== 'loggedOut' ? <SettingsPage /> : null;
-                                case 'pricing':
-                                    return <PricingPage />;
-                                case 'problem-detail':
-                                    // Problem ID must be passed to this page
-                                    const pathParts = window.location.hash.split('/');
-                                    const problemId = pathParts[pathParts.length - 1];
-                                    const problem = mockProblems.find(p => p.id === problemId);
-                                    return problem ? <ProblemDetailPage problem={problem} onNavigate={setCurrentPage} /> : <p>Problem not found.</p>;
-                                default:
-                                    return userRole === 'provider' ?
-                                        <ProviderDashboardPage userProfile={userProfile} onNavigate={setCurrentPage} /> :
-                                        <MemberDashboardPage userProfile={userProfile} onNavigate={setCurrentPage} />;
-                            }
-                        })()}
-                    </main>
-                </div>
+
+                    {/* Page Content based on currentPage state */}
+                    {currentPage === 'dashboard' && (
+                        <DashboardPage userRole={displayUserRole} problems={problems} userProfiles={userProfiles} userId={userId} />
+                    )}
+                    {currentPage === 'profile' && userProfile && (
+                        <ProfilePage userProfile={userProfile} updateUserProfile={updateUserProfile} />
+                    )}
+                    {currentPage === 'provider-dashboard' && canAccess('provider') && (
+                        <ProviderDashboard problems={problems} userProfiles={userProfiles} userId={userId} />
+                    )}
+                    {currentPage === 'pricing' && canAccess('provider') && (
+                        <PricingPage pricingPlans={pricingPlans} />
+                    )}
+                    {currentPage === 'admin-panel' && canAccess('admin') && (
+                        <AdminPanel userProfiles={userProfiles} problems={problems} />
+                    )}
+                    {currentPage === 'branding-settings' && canAccess('admin') && (
+                        <BrandingSettings appName={appName} appLogo={appLogo} updateBranding={updateBrandingInApp} />
+                    )}
+
+                    {/* Modals */}
+                    {showPostProblemModal && canAccess('member') && (
+                        <PostProblemModal
+                            onClose={() => setShowPostProblemModal(false)}
+                            onPost={handlePostProblem}
+                        />
+                    )}
+                    {/* RegisterModal will now only show if Auth0 user exists but no DB profile */}
+                    {showRegisterModal && isAuthenticated && !userProfile && (
+                        <RegisterModal
+                            onClose={() => setShowRegisterModal(false)}
+                            onRegister={handleRegister}
+                            onSelectPlan={(plan) => setSelectedPlan(plan)}
+                            pricingPlans={pricingPlans}
+                            auth0User={user} // Pass Auth0 user data to registration
+                        />
+                    )}
+                </main>
             </div>
-            {showPostProblemModal && (
-                <PostProblemModal
-                    onClose={() => setShowPostProblemModal(false)}
-                    onSave={handlePostProblem}
-                    activeProblemsCount={
-                        mockProblems.filter(p => p.requesterId === userId && p.status === 'open').length
-                    }
-                    isPaidMember={isPaidMember}
-                />
-            )}
-            {showRegisterModal && (
-                <RegistrationPage
-                    onClose={() => setShowRegisterModal(false)}
-                />
-            )}
-            {selectedPlan && (
-                <SignUpFormModal
-                    plan={selectedPlan}
-                    onClose={() => setSelectedPlan(null)}
-                />
-            )}
         </AppContext.Provider>
     );
 };
 
-// --- Dashboard Components ---
-
-// ProviderDashboardPage
-const ProviderDashboardPage = ({ userProfile, onNavigate }) => {
-    const { userId, mockProblems } = useContext(AppContext);
-    const [totalQuotes, setTotalQuotes] = useState(0);
-    const [pendingQuotes, setPendingQuotes] = useState(0);
-
-    useEffect(() => {
-        // Calculate quotes based on mockProblems
-        let providerQuotes = [];
-        mockProblems.forEach(problem => {
-            problem.quotes.forEach(quote => {
-                if (quote.providerId === userId) {
-                    providerQuotes.push({ ...quote, problemTitle: problem.title }); // Include problem title for context
-                }
-            });
-        });
-        setTotalQuotes(providerQuotes.length);
-        setPendingQuotes(providerQuotes.filter(quote => quote.status === 'pending').length);
-    }, [mockProblems, userId]); // Recalculate if mockProblems change
-
-    // Sort quotes by creation date, newest first for display in dashboard
-    const sortedMyQuotes = [...mockProblems.flatMap(problem =>
-        problem.quotes.filter(quote => quote.providerId === userId)
-            .map(quote => ({ ...quote, problemTitle: problem.title, problemStatus: problem.status }))
-    )].sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime());
+export default App;
 
 
-    return (
-        <div className="space-y-8">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">Provider Dashboard Overview</h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {/* Provider Status Card */}
-                <div className="bg-white p-6 rounded-lg shadow-md flex items-center space-x-4">
-                    <BriefcaseIcon className="text-[#964b00]" size={36} />
-                    <div>
-                        <h3 className="text-lg font-semibold text-gray-700">Provider Status</h3>
-                        <p className={`text-xl font-bold ${userProfile?.isProviderApproved ? 'text-green-600' : 'text-red-600'}`}>
-                            {userProfile?.isProviderApproved ? 'Approved' : 'Pending Approval'}
-                        </p>
-                        {!userProfile?.isProviderApproved && (
-                            <p className="text-sm text-gray-500 mt-1">Your application is under review.</p>
-                        )}
-                    </div>
-                </div>
-
-                {/* Total Quotes Submitted */}
-                <div className="bg-white p-6 rounded-lg shadow-md flex items-center space-x-4">
-                    <PackageIcon className="text-[#964b00]" size={36} />
-                    <div>
-                        <h3 className="text-lg font-semibold text-gray-700">Quotes Submitted</h3>
-                        <p className="text-xl font-bold text-[#964b00]">
-                            {totalQuotes}
-                        </p>
-                        <p className="text-sm text-gray-500 mt-1">{pendingQuotes} pending review</p>
-                        <button
-                            onClick={() => onNavigate('quotes')}
-                            className="text-sm text-blue-500 hover:underline mt-1"
-                        >
-                            View My Quotes
-                        </button>
-                    </div>
-                </div>
-
-                {/* Quick Actions */}
-                <div className="bg-white p-6 rounded-lg shadow-md">
-                    <h3 className="text-lg font-semibold text-gray-700 mb-4">Quick Actions</h3>
-                    <div className="space-y-3">
-                        <button
-                            onClick={() => onNavigate('problems')}
-                            className="flex items-center w-full px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 shadow-md"
-                        >
-                            <FileTextIcon size={20} className="mr-2" />
-                            View Problem List
-                        </button>
-                        <button
-                            onClick={() => onNavigate('profile')}
-                            className="flex items-center w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors duration-200 shadow-md"
-                        >
-                            <UserIcon size={20} className="mr-2" />
-                            Update Profile
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Recently Submitted Quotes (can be expanded) */}
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
-                    <PackageIcon size={24} className="mr-2 text-[#964b00]" /> My Recent Quotes
-                </h3>
-                {totalQuotes === 0 ? (
-                    <p className="text-gray-600">No recent quotes found.</p>
-                ) : (
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full bg-white rounded-lg">
-                            <thead>
-                                <tr className="bg-gray-100 text-gray-600 uppercase text-xs leading-normal">
-                                    <th className="py-2 px-4 text-left">Problem</th>
-                                    <th className="py-2 px-4 text-left">Amount</th>
-                                    <th className="py-2 px-4 text-left">Status</th>
-                                    <th className="py-2 px-4 text-left">Date</th>
-                                </tr>
-                            </thead>
-                            <tbody className="text-gray-600 text-sm font-light">
-                                {sortedMyQuotes.slice(0, 3).map(quote => ( // Show top 3 recent quotes
-                                    <tr key={quote.id} className="border-b border-gray-100">
-                                        <td className="py-2 px-4">{quote.problemTitle}</td>
-                                        <td className="py-2 px-4">R{quote.amount?.toFixed(2)}</td>
-                                        <td className="py-2 px-4">
-                                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                                                quote.status === 'accepted' ? 'bg-green-100 text-green-800' :
-                                                'bg-yellow-100 text-yellow-800'
-                                            }`}>
-                                                {quote.status}
-                                            </span>
-                                        </td>
-                                        <td className="py-2 px-4">{quote.createdAt?.toLocaleDateString()}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-                <button
-                    onClick={() => onNavigate('quotes')}
-                    className="mt-4 px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
-                >
-                    Go to My Quotes
-                </button>
-            </div>
-        </div>
-    );
-};
-
-// MemberDashboardPage
-const MemberDashboardPage = ({ userProfile, onNavigate }) => {
-    const { isPaidMember, userId, mockProblems, setShowPostProblemModal, userRole, handleRegister, setMessage } = useContext(AppContext);
-    const [myProblemsCount, setMyProblemsCount] = useState(0);
-    const [quotesReceivedCount, setQuotesReceivedCount] = useState(0);
-    const [recentQuotes, setRecentQuotes] = useState([]);
-    const [showBecomeProviderModal, setShowBecomeProviderModal] = useState(false);
-
-
-    useEffect(() => {
-        let memberProblems = mockProblems.filter(p => p.requesterId === userId);
-        setMyProblemsCount(memberProblems.length);
-
-        let totalQuotesForMyProblems = 0;
-        let collectedRecentQuotes = [];
-        memberProblems.forEach(problem => {
-            problem.quotes.forEach(quote => {
-                collectedRecentQuotes.push({
-                    ...quote,
-                    problemTitle: problem.title,
-                    problemStatus: problem.status,
-                    problemId: problem.id
-                });
-            });
-        });
-        setQuotesReceivedCount(totalQuotesForMyProblems);
-        setRecentQuotes(collectedRecentQuotes.sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime()));
-    }, [mockProblems, userId]);
-
-    return (
-        <div className="space-y-8">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">Member Dashboard Overview</h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {/* Membership Status Card */}
-                <div className="bg-white p-6 rounded-lg shadow-md flex items-center space-x-4">
-                    <UserIcon className="text-[#964b00]" size={36} />
-                    <div>
-                        <h3 className="text-lg font-semibold text-gray-700">Membership Status</h3>
-                        <p className={`text-xl font-bold ${isPaidMember ? 'text-blue-600' : 'text-yellow-600'}`}>
-                            {isPaidMember ? 'Paid Member' : 'Free Member'}
-                        </p>
-                        {!isPaidMember && (
-                            <p className="text-sm text-gray-500 mt-1">Unlock full features by upgrading.</p>
-                        )}
-                    </div>
-                </div>
-
-                {/* My Problems Card */}
-                <div className="bg-white p-6 rounded-lg shadow-md flex items-center space-x-4">
-                    <FileTextIcon className="text-[#964b00]" size={36} />
-                    <div>
-                        <h3 className="text-lg font-semibold text-gray-700">My Posted Problems</h3>
-                        <p className="text-xl font-bold text-[#964b00]">
-                            {myProblemsCount}
-                        </p>
-                        <p className="text-sm text-gray-500 mt-1">{quotesReceivedCount} quotes received</p>
-                        <button
-                            onClick={() => onNavigate('my-requests')}
-                            className="text-sm text-blue-500 hover:underline mt-1"
-                        >
-                            View My Requests
-                        </button>
-                    </div>
-                </div>
-
-                {/* Quick Actions */}
-                <div className="bg-white p-6 rounded-lg shadow-md">
-                    <h3 className="text-lg font-semibold text-gray-700 mb-4">Quick Actions</h3>
-                    <div className="space-y-3">
-                        <button
-                            onClick={() => onNavigate('problems')}
-                            className="flex items-center w-full px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 shadow-md"
-                        >
-                            <FileTextIcon size={20} className="mr-2" />
-                            View Public Problems
-                        </button>
-                        {userProfile.role === 'member' && ( // Ensure only members see this
-                            <button
-                                onClick={() => setShowPostProblemModal(true)} // Directly opens the modal
-                                className="flex items-center w-full px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200 shadow-md"
-                            >
-                                <PlusCircleIcon size={20} className="mr-2" />
-                                Post New Problem
-                            </button>
-                        )}
-                        {!isPaidMember && userProfile.role === 'member' && (
-                             <button
-                                onClick={() => onNavigate('pricing')}
-                                className="flex items-center w-full px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 shadow-md"
-                            >
-                                <DollarSignIcon size={20} className="mr-2" />
-                                Become a Paid Member
-                            </button>
-                        )}
-                        {userProfile.role === 'member' && !userProfile.isProviderApproved && ( // Members not yet approved as providers
-                             <button
-                                onClick={() => setShowBecomeProviderModal(true)}
-                                className="flex items-center w-full px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 transition-colors duration-200 shadow-md"
-                            >
-                                <BriefcaseIcon size={20} className="mr-2" />
-                                Register as a Provider
-                            </button>
-                        )}
-                        <button
-                            onClick={() => onNavigate('profile')}
-                            className="flex items-center w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors duration-200 shadow-md"
-                        >
-                            <UserIcon size={20} className="mr-2" />
-                            Update Profile
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Recent Quotes Received (can be expanded) */}
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
-                    <PackageIcon size={24} className="mr-2 text-[#964b00]" /> Recent Quotes on My Problems
-                </h3>
-                {quotesReceivedCount === 0 || userProfile.role === 'loggedOut' ? ( // Check for logged out as well
-                    <p className="text-gray-600">No recent quotes received for your problems.</p>
-                ) : (
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full bg-white rounded-lg">
-                            <thead>
-                                <tr className="bg-gray-100 text-gray-600 uppercase text-xs leading-normal">
-                                    <th className="py-2 px-4 text-left">Problem</th>
-                                    <th className="py-2 px-4 text-left">Provider</th>
-                                    <th className="py-2 px-4 text-left">Amount</th>
-                                    <th className="py-2 px-4 text-left">Status</th>
-                                    <th className="py-2 px-4 text-left">Date</th>
-                                </tr>
-                            </thead>
-                            <tbody className="text-gray-600 text-sm font-light">
-                                {recentQuotes.slice(0, 3).map(quote => ( // Show top 3 recent quotes
-                                    <tr key={quote.id} className="border-b border-gray-100">
-                                        <td className="py-2 px-4">{quote.problemTitle}</td>
-                                        <td className="py-2 px-4">{quote.providerName}</td>
-                                        <td className="py-2 px-4">R{quote.amount?.toFixed(2)}</td>
-                                        <td className="py-2 px-4">
-                                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                                                quote.status === 'accepted' ? 'bg-green-100 text-green-800' :
-                                                'bg-yellow-100 text-yellow-800'
-                                            }`}>
-                                                {quote.status}
-                                            </span>
-                                        </td>
-                                        <td className="py-2 px-4">{quote.createdAt?.toLocaleDateString()}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-                <button
-                    onClick={() => onNavigate('my-requests')}
-                    className="mt-4 px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
-                >
-                    Go to My Requests
-                </button>
-            </div>
-            {showBecomeProviderModal && (
-                <BecomeProviderModal
-                    onClose={() => setShowBecomeProviderModal(false)}
-                    onRegister={handleRegister}
-                />
-            )}
-        </div>
-    );
-};
-
-// --- General Pages ---
-
-// RegistrationPage for new users
-const RegistrationPage = ({ onClose }) => {
-    const { handleRegister, setMessage } = useContext(AppContext);
-    const [name, setName] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [phone, setPhone] = useState('');
-    const [address, setAddress] = useState('');
-    const [role, setRole] = useState('member'); // Default to member
-    const [formError, setFormError] = useState('');
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        setFormError('');
-
-        if (!name || !email || !password || !role) {
-            setFormError('Name, Email, Password, and Role are required.');
-            return;
+// --- Dashboard Page Component ---
+const DashboardPage = ({ userRole, problems, userProfiles, userId }) => {
+    // Filter problems based on user role
+    const filteredProblems = problems.filter(problem => {
+        if (userRole === 'admin') {
+            return true; // Admins see all problems
+        } else if (userRole === 'member') {
+            return problem.requesterId === userId; // Members see only their own problems
+        } else if (userRole === 'provider') {
+            // Providers see approved problems they haven't quoted, or problems they have quoted
+            return problem.isApproved && (!problem.quotes.some(q => q.providerId === userId) || problem.quotes.some(q => q.providerId === userId));
         }
-
-        // Basic email validation
-        if (!/\S+@\S+\.\S+/.test(email)) {
-            setFormError('Please enter a valid email address.');
-            return;
-        }
-
-        // Basic password strength (e.g., min 6 chars)
-        if (password.length < 6) {
-            setFormError('Password must be at least 6 characters long.');
-            return;
-        }
-
-        handleRegister({ name, email, password, phone, address }, role, false); // isPaid defaults to false
-        setMessage({type: 'success', text: `Registration successful! Welcome, ${name}.`});
-        onClose();
-    };
-
-    return (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">Register a New Account</h3>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regName">
-                            Full Name
-                        </label>
-                        <input
-                            type="text"
-                            id="regName"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regEmail">
-                            Email
-                        </label>
-                        <input
-                            type="email"
-                            id="regEmail"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regPassword">
-                            Password
-                        </label>
-                        <input
-                            type="password"
-                            id="regPassword"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regPhone">
-                            Phone (Optional)
-                        </label>
-                        <input
-                            type="tel"
-                            id="regPhone"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={phone}
-                            onChange={(e) => setPhone(e.target.value)}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regAddress">
-                            Address (Optional)
-                        </label>
-                        <textarea
-                            id="regAddress"
-                            rows="2"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={address}
-                            onChange={(e) => setAddress(e.target.value)}
-                        ></textarea>
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regRole">
-                            Register as:
-                        </label>
-                        <select
-                            id="regRole"
-                            className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={role}
-                            onChange={(e) => setRole(e.target.value)}
-                            required
-                        >
-                            <option value="member">Member</option>
-                            <option value="provider">Provider</option>
-                        </select>
-                    </div>
-
-                    {formError && (
-                        <p className="text-red-500 text-sm">{formError}</p>
-                    )}
-
-                    <div className="flex justify-end space-x-4 mt-6">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
-                        >
-                            Register
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
-
-
-// BecomeProviderModal for existing members
-const BecomeProviderModal = ({ onClose }) => {
-    const { userProfile, handleRegister, setMessage } = useContext(AppContext);
-    const [companyName, setCompanyName] = useState('');
-    const [specialties, setSpecialties] = useState('');
-    const [bio, setBio] = useState('');
-    const [formError, setFormError] = useState('');
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        setFormError('');
-
-        if (!companyName || !specialties) {
-            setFormError('Company Name and Specialties are required.');
-            return;
-        }
-
-        // Use existing user profile data and update role/provider-specific fields
-        const updatedUserData = {
-            ...userProfile,
-            companyName,
-            specialties,
-            bio: bio || userProfile.bio, // Allow updating bio, or keep existing
-        };
-
-        handleRegister(updatedUserData, 'provider', userProfile.isPaidMember); // Pass existing paid status
-        setMessage({type: 'success', text: `You are now registered as a Provider! Awaiting admin approval.`});
-        onClose();
-    };
-
-    return (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">Register as a Provider</h3>
-                <p className="text-gray-700 mb-4">Your current member details will be used. Please provide additional provider-specific information.</p>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="companyName">
-                            Company Name
-                        </label>
-                        <input
-                            type="text"
-                            id="companyName"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={companyName}
-                            onChange={(e) => setCompanyName(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="specialties">
-                            Specialties (e.g., Plumbing, Electrical)
-                        </label>
-                        <input
-                            type="text"
-                            id="specialties"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={specialties}
-                            onChange={(e) => setSpecialties(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="providerBio">
-                            Provider Bio (Optional)
-                        </label>
-                        <textarea
-                            id="providerBio"
-                            rows="3"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={bio}
-                            onChange={(e) => setBio(e.target.value)}
-                        ></textarea>
-                    </div>
-
-                    {formError && (
-                        <p className="text-red-500 text-sm">{formError}</p>
-                    )}
-
-                    <div className="flex justify-end space-x-4 mt-6">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            className="px-6 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors duration-200"
-                        >
-                            Submit for Approval
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
-
-
-// Pricing Page
-const PricingPage = () => {
-    const { setSelectedPlan, setMessage, mockPricingPlans } = useContext(AppContext); // Use context for pricing plans
-
-    const handleSelectPlan = (plan) => {
-        setSelectedPlan(plan);
-        setMessage({type: 'info', text: `You've selected the ${plan.name} plan. Please complete the sign-up.`});
-    };
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-8 text-center">Membership Plans</h2>
-            <p className="text-center text-gray-600 mb-8">Choose the plan that best suits your needs.</p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {mockPricingPlans.map(plan => ( // Use mockPricingPlans from context
-                    <div key={plan.id} className="border border-gray-200 rounded-lg p-6 flex flex-col items-center text-center shadow-md hover:shadow-lg transition-shadow duration-300">
-                        <h3 className="text-2xl font-bold text-[#964b00] mb-2">{plan.name}</h3>
-                        <p className="text-4xl font-extrabold text-gray-900 mb-4">{plan.price}</p>
-                        <ul className="text-gray-700 space-y-2 mb-6 text-left w-full">
-                            {plan.features.map((feature, index) => (
-                                <li key={index} className="flex items-center">
-                                    <CheckCircle2Icon size={18} className="text-green-500 mr-2" />
-                                    {feature}
-                                </li>
-                            ))}
-                        </ul>
-                        <button
-                            onClick={() => handleSelectPlan(plan)}
-                            className="mt-auto px-6 py-2 bg-[#964b00] text-white font-semibold rounded-md hover:bg-[#b3641a] transition-colors duration-200 shadow-lg"
-                        >
-                            Select Plan
-                        </button>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-};
-
-// SignUpFormModal (Appears after selecting a plan)
-const SignUpFormModal = ({ plan, onClose }) => {
-    const { handleBecomePaidMember } = useContext(AppContext);
-    const [name, setName] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [phone, setPhone] = useState('');
-    const [address, setAddress] = useState('');
-    const [formError, setFormError] = useState('');
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        setFormError('');
-
-        if (!name || !email || !password) {
-            setFormError('Name, Email, and Password are required.');
-            return;
-        }
-        if (!/\S+@\S+\.\S+/.test(email)) {
-            setFormError('Please enter a valid email address.');
-            return;
-        }
-        if (password.length < 6) {
-            setFormError('Password must be at least 6 characters long.');
-            return;
-        }
-
-        // Simulate redirection to Paystack using the planCode
-        // In a real app, this would involve an API call to Paystack to initialize a transaction
-        // using the planCode, and then redirecting the user to Paystack's payment page.
-        // For this demo, we'll construct a mock Paystack link with the planCode.
-        const paystackPaymentLink = `https://paystack.com/pay/${plan.planCode || 'default_plan_code'}`; // Use plan.planCode
-        window.open(paystackPaymentLink, '_blank');
-
-        // After redirection, the user would complete payment.
-        // For this demo, we immediately simulate success after opening Paystack link.
-        // In a real app, this would be handled by a Paystack webhook or callback.
-        handleBecomePaidMember({ name, email, password, phone, address }, plan);
-        onClose(); // Close the modal
-    };
-
-    return (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">Sign Up for {plan.name} Plan</h3>
-                <p className="text-gray-700 mb-4">Complete your details to proceed to payment.</p>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupName">
-                            Full Name
-                        </label>
-                        <input
-                            type="text"
-                            id="signupName"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupEmail">
-                            Email
-                        </label>
-                        <input
-                            type="email"
-                            id="signupEmail"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupPassword">
-                            Password
-                        </label>
-                        <input
-                            type="password"
-                            id="signupPassword"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            required
-                        />
-                    </div>
-                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupPhone">
-                            Phone (Optional)
-                        </label>
-                        <input
-                            type="tel"
-                            id="signupPhone"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={phone}
-                            onChange={(e) => setPhone(e.target.value)}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupAddress">
-                            Address (Optional)
-                        </label>
-                        <textarea
-                            id="signupAddress"
-                            rows="2"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={address}
-                            onChange={(e) => setAddress(e.target.value)}
-                        ></textarea>
-                    </div>
-
-                    {formError && (
-                        <p className="text-red-500 text-sm">{formError}</p>
-                    )}
-
-                    <div className="flex flex-col space-y-3 mt-6">
-                        <button
-                            type="submit"
-                            className="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
-                        >
-                            Proceed to Payment ({plan.price})
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                handleBecomePaidMember({ name, email, password, phone, address }, plan);
-                                onClose();
-                            }}
-                            className="px-6 py-3 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200"
-                        >
-                            Simulate Payment Success & Continue to App
-                        </button>
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
-                        >
-                            Cancel
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
-
-
-// ProfilePage (Shared for Members and Providers)
-const ProfilePage = () => {
-    const { userProfile, setUserProfile, userRole, setMockUserProfiles, setMessage } = useContext(AppContext);
-    const [editMode, setEditMode] = useState(false);
-    const [formData, setFormData] = useState({
-        name: '',
-        email: '',
-        phone: '',
-        bio: '',
-        address: '',
-        companyName: '',
-        specialties: '',
+        return false; // Logged out users see nothing
     });
-    const [saveMessage, setSaveMessage] = useState({ type: '', message: '' });
 
-    useEffect(() => {
-        if (userProfile) {
-            setFormData({
-                name: userProfile.name || '',
-                email: userProfile.email || '',
-                phone: userProfile.phone || '',
-                bio: userProfile.bio || '',
-                address: userProfile.address || '',
-                companyName: userProfile.companyName || '',
-                specialties: userProfile.specialties || '',
-            });
-        }
-    }, [userProfile]);
-
-    const handleChange = (e) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleSave = () => {
-        const updatedProfile = { ...userProfile, ...formData };
-        setUserProfile(updatedProfile); // Update local state immediately
-        setMockUserProfiles(prev => ({ // Update global mock profiles
-            ...prev,
-            [userProfile.uid]: updatedProfile
-        }));
-        setEditMode(false);
-        setMessage({ type: 'success', message: 'Profile updated successfully!' });
-    };
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center justify-between">
-                My Profile
-                {!editMode && (
-                    <button
-                        onClick={() => setEditMode(true)}
-                        className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 flex items-center"
-                    >
-                        <EditIcon size={18} className="mr-2" /> Edit Profile
-                    </button>
-                )}
-            </h2>
-
-            {saveMessage.message && (
-                <div className={`p-3 mb-4 rounded-md text-sm ${saveMessage.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                    {saveMessage.message}
-                </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2">Name:</label>
-                        {editMode ? (
-                            <input
-                                type="text"
-                                name="name"
-                                value={formData.name}
-                                onChange={handleChange}
-                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            />
-                        ) : (
-                            <p className="text-gray-900 text-lg">{userProfile?.name || 'N/A'}</p>
-                        )}
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2">Email:</label>
-                        {editMode ? (
-                            <input
-                                type="email"
-                                name="email"
-                                value={formData.email}
-                                onChange={handleChange}
-                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            />
-                        ) : (
-                            <p className="text-gray-900 text-lg">{userProfile?.email || 'N/A'}</p>
-                        )}
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2">Phone:</label>
-                        {editMode ? (
-                            <input
-                                type="text"
-                                name="phone"
-                                value={formData.phone}
-                                onChange={handleChange}
-                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            />
-                        ) : (
-                            <p className="text-gray-900 text-lg">{userProfile?.phone || 'N/A'}</p>
-                        )}
-                    </div>
-                </div>
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2">Address:</label>
-                        {editMode ? (
-                            <textarea
-                                name="address"
-                                value={formData.address}
-                                onChange={handleChange}
-                                rows="3"
-                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            ></textarea>
-                        ) : (
-                            <p className="text-gray-900 text-lg whitespace-pre-wrap">{userProfile?.address || 'N/A'}</p>
-                        )}
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2">Bio:</label>
-                        {editMode ? (
-                            <textarea
-                                name="bio"
-                                value={formData.bio}
-                                onChange={handleChange}
-                                rows="5"
-                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            ></textarea>
-                        ) : (
-                            <p className="text-gray-900 text-lg whitespace-pre-wrap">{userProfile?.bio || 'N/A'}</p>
-                        )}
-                    </div>
-                    {userRole === 'provider' && (
-                        <>
-                            <div>
-                                <label className="block text-gray-700 text-sm font-bold mb-2">Company Name:</label>
-                                {editMode ? (
-                                    <input
-                                        type="text"
-                                        name="companyName"
-                                        value={formData.companyName}
-                                        onChange={handleChange}
-                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                                    />
-                                ) : (
-                                    <p className="text-gray-900 text-lg">{userProfile?.companyName || 'N/A'}</p>
-                                )}
-                            </div>
-                            <div>
-                                <label className="block text-gray-700 text-sm font-bold mb-2">Specialties:</label>
-                                {editMode ? (
-                                    <input
-                                        type="text"
-                                        name="specialties"
-                                        value={formData.specialties}
-                                        onChange={handleChange}
-                                        placeholder="e.g., Plumbing, Electrical, Landscaping"
-                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                                    />
-                                ) : (
-                                    <p className="text-gray-900 text-lg">{userProfile?.specialties || 'N/A'}</p>
-                                )}
-                            </div>
-                        </>
-                    )}
-                </div>
-            </div>
-
-            {editMode && (
-                <div className="mt-8 flex justify-end space-x-4">
-                    <button
-                        onClick={() => { setEditMode(false); setMessage({ type: '', message: '' }); }} // Clear message on cancel
-                        className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        type="submit"
-                        className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
-                    >
-                        Save Changes
-                    </button>
-                </div>
-            )}
-        </div>
-    );
-};
-
-// ProblemListPage (Publicly accessible with filters)
-const ProblemListPage = ({ onNavigate }) => {
-    const { userRole, userId, isPaidMember, mockProblems, setMockProblems, mockUserProfiles, setShowPostProblemModal, setMessage } = useContext(AppContext);
-    // Removed local message state, using global one from context now
-
-    // Filter states
-    const [filterCategory, setFilterCategory] = useState('All');
-    const [filterLocation, setFilterLocation] = useState('All');
-    const [minBudget, setMinBudget] = useState('');
-    const [maxBudget, setMaxBudget] = useState('');
-
-    const handleSendQuote = (problemId, quoteData) => {
-        if (userRole !== 'provider') {
-            setMessage({ type: 'error', text: 'Only providers can send quotes.' });
-            return;
-        }
-
-        setMockProblems(prevProblems =>
-            prevProblems.map(problem => {
-                if (problem.id === problemId) {
-                    const newQuote = {
-                        id: crypto.randomUUID(),
-                        providerId: userId,
-                        providerName: quoteData.providerName,
-                        amount: quoteData.amount,
-                        details: quoteData.details,
-                        proposedStartDate: quoteData.proposedStartDate,
-                        proposedEndDate: quoteData.proposedEndDate,
-                        status: 'pending',
-                        createdAt: new Date(),
-                    };
-                    return {
-                        ...problem,
-                        quotes: [...(problem.quotes || []), newQuote]
-                    };
-                }
-                return problem;
-            })
-        );
-        setMessage({ type: 'success', text: 'Quote sent successfully!' });
-    };
-
-    const uniqueCategories = ['All', ...new Set(mockProblems.map(p => p.category))];
-    const uniqueLocations = ['All', ...new Set(mockProblems.map(p => p.location))];
-
-    const filteredProblems = mockProblems.filter(problem => {
-        // Only show approved problems to non-admin users
-        if (userRole !== 'admin' && !problem.isApproved) {
-            return false;
-        }
-
-        // Filter by category
-        if (filterCategory !== 'All' && problem.category !== filterCategory) {
-            return false;
-        }
-        // Filter by location
-        if (filterLocation !== 'All' && problem.location !== filterLocation) {
-            return false;
-        }
-        // Filter by budget
-        const budget = problem.estimatedBudget;
-        if (minBudget && budget < parseFloat(minBudget)) {
-            return false;
-        }
-        if (maxBudget && budget > parseFloat(maxBudget)) {
-            return false;
-        }
-        return true;
-    }).sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime()); // Sort newest first
+    const pendingProblems = filteredProblems.filter(p => !p.isApproved && userRole === 'admin');
+    const approvedProblems = filteredProblems.filter(p => p.isApproved || userRole === 'member' || userRole === 'provider');
 
 
     return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center justify-between">
-                Public Problem List
-                {userRole === 'member' && ( // Always allow button click for members
-                    <button
-                        onClick={() => setShowPostProblemModal(true)}
-                        className={`px-4 py-2 rounded-md transition-colors duration-200 flex items-center bg-green-600 text-white hover:bg-green-700`}
-                        title={`Post a new problem (Free members limited to 5 active problems)`}
-                    >
-                        <PlusCircleIcon size={18} className="mr-2" /> Post New Problem
-                    </button>
-                )}
-            </h2>
-
-            {/* Message display moved to App.js */}
-
-            {/* Filters Section */}
-            <div className="mb-6 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 items-end">
-                <div>
-                    <label htmlFor="filterCategory" className="block text-gray-700 text-sm font-bold mb-2">Category</label>
-                    <select
-                        id="filterCategory"
-                        value={filterCategory}
-                        onChange={(e) => setFilterCategory(e.target.value)}
-                        className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                    >
-                        {uniqueCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                    </select>
-                </div>
-                <div>
-                    <label htmlFor="filterLocation" className="block text-gray-700 text-sm font-bold mb-2">Location</label>
-                    <select
-                        id="filterLocation"
-                        value={filterLocation}
-                        onChange={(e) => setFilterLocation(e.target.value)}
-                        className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                    >
-                        {uniqueLocations.map(loc => <option key={loc} value={loc}>{loc}</option>)}
-                    </select>
-                </div>
-                <div>
-                    <label htmlFor="minBudget" className="block text-gray-700 text-sm font-bold mb-2">Min Budget (R)</label>
-                    <input
-                        type="number"
-                        id="minBudget"
-                        value={minBudget}
-                        onChange={(e) => setMinBudget(e.target.value)}
-                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                        placeholder="e.g., 100"
-                    />
-                </div>
-                <div>
-                    <label htmlFor="maxBudget" className="block text-gray-700 text-sm font-bold mb-2">Max Budget (R)</label>
-                    <input
-                        type="number"
-                        id="maxBudget"
-                        value={maxBudget}
-                        onChange={(e) => setMaxBudget(e.target.value)}
-                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                        placeholder="e.g., 1000"
-                    />
-                </div>
-            </div>
-
-
-            {filteredProblems.length === 0 ? (
-                <p className="text-gray-600">No problems found matching your criteria.</p>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredProblems.map(problem => (
-                        <ProblemCard
-                            key={problem.id}
-                            problem={problem}
-                            userRole={userRole}
-                            isPaidMember={isPaidMember}
-                            currentUserId={userId}
-                            onSendQuote={handleSendQuote}
-                            onNavigate={onNavigate} // Pass onNavigate for problem details page
-                        />
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-};
-
-// ProblemCard component for ProblemListPage
-const ProblemCard = ({ problem, userRole, isPaidMember, currentUserId, onSendQuote, onNavigate }) => {
-    const { userProfile, mockUserProfiles } = useContext(AppContext);
-    const [hasQuoted, setHasQuoted] = useState(false);
-
-    // Determine if the current provider has quoted this problem
-    useEffect(() => {
-        if (userRole === 'provider' && problem.quotes) {
-            setHasQuoted(problem.quotes.some(quote => quote.providerId === currentUserId));
-        } else {
-            setHasQuoted(false);
-        }
-    }, [problem.quotes, currentUserId, userRole]);
-
-    const handleViewDetails = () => {
-        // Use window.location.hash to simulate routing
-        window.location.hash = `problem-detail/${problem.id}`;
-        onNavigate('problem-detail'); // Update parent state for rendering ProblemDetailPage
-    };
-
-    return (
-        <div className="bg-gray-50 p-4 rounded-lg shadow-sm border border-gray-200">
-            <h3 className="text-xl font-semibold text-gray-800 mb-2">{problem.title}</h3>
-            <p className="text-gray-700 mb-2 text-sm">{problem.description}</p>
-            <p className="text-gray-600 font-medium text-xs">Category: {problem.category || 'General'}</p>
-            <p className="text-gray-600 font-medium text-xs">Location: {problem.location || 'N/A'}</p>
-            <p className="text-gray-600 font-medium text-xs">Budget: R{problem.estimatedBudget?.toFixed(2) || 'N/A'}</p>
-            <p className="text-gray-600 font-medium text-xs">Status: <span className="capitalize">{problem.status}</span></p>
-            <p className="text-gray-500 text-xs mt-1">Posted: {problem.createdAt?.toLocaleDateString()}</p>
-            {!problem.isApproved && userRole !== 'loggedOut' && (
-                <span className="px-2 py-1 text-xs font-semibold bg-red-100 text-red-800 rounded-full mt-2 inline-block">Awaiting Admin Approval</span>
-            )}
-
-            <div className="mt-4 flex flex-col space-y-2">
-                {userRole === 'provider' && problem.isApproved && problem.status === 'open' && (
-                    <button
-                        onClick={handleViewDetails} // Takes to ProblemDetailPage
-                        className="px-3 py-1 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 text-sm flex items-center justify-center"
-                    >
-                        <PackageIcon size={16} className="mr-1" /> View Details & Quote
-                    </button>
-                )}
-                {userRole === 'member' && problem.requesterId === currentUserId && (
-                    <button
-                        onClick={handleViewDetails} // Takes to ProblemDetailPage
-                        className="px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 text-sm flex items-center justify-center"
-                    >
-                        <FileTextIcon size={16} className="mr-1" /> View My Problem
-                    </button>
-                )}
-                {userRole === 'loggedOut' || (userRole === 'member' && problem.requesterId !== currentUserId) && (
-                     <button
-                        onClick={handleViewDetails} // Takes to ProblemDetailPage
-                        className="px-3 py-1 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors duration-200 text-sm flex items-center justify-center"
-                    >
-                        View Problem Details
-                    </button>
-                )}
-            </div>
-        </div>
-    );
-};
-
-// ProblemDetailPage - New Page for Problem Details and Quoting
-const ProblemDetailPage = ({ problem, onNavigate }) => {
-    const { userRole, userId, isPaidMember, mockProblems, setMockProblems, userProfile, setMessage } = useContext(AppContext);
-    const [showQuoteForm, setShowQuoteForm] = useState(false);
-    const [showMemberDetailsModal, setShowMemberDetailsModal] = useState(false);
-    const [showProviderDetailsModal, setShowProviderDetailsModal] = useState(false);
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [confirmAction, setConfirmAction] = useState(null);
-    const [confirmMessage, setConfirmMessage] = useState('');
-
-    const hasQuoted = userRole === 'provider' && problem.quotes.some(quote => quote.providerId === userId);
-    const isRequester = userRole === 'member' && problem.requesterId === userId;
-    const isProblemOpen = problem.status === 'open';
-    const hasAcceptedQuote = problem.status === 'closed' && problem.acceptedQuoteId;
-
-    const handleSendQuote = (quoteData) => {
-        if (userRole !== 'provider' || !userProfile.isProviderApproved) {
-            setMessage({ type: 'error', text: 'You must be an approved provider to send quotes.' });
-            return;
-        }
-        if (hasQuoted) {
-            setMessage({ type: 'error', text: 'You have already submitted a quote for this problem.' });
-            return;
-        }
-
-        setMockProblems(prevProblems =>
-            prevProblems.map(p => {
-                if (p.id === problem.id) {
-                    const newQuote = {
-                        id: crypto.randomUUID(),
-                        providerId: userId,
-                        providerName: userProfile.name,
-                        amount: quoteData.proposedBudget,
-                        details: quoteData.motivation,
-                        proposedStartDate: quoteData.proposedStartDate,
-                        proposedEndDate: quoteData.proposedEndDate,
-                        status: 'pending',
-                        createdAt: new Date(),
-                    };
-                    return {
-                        ...p,
-                        quotes: [...(p.quotes || []), newQuote]
-                    };
-                }
-                return p;
-            })
-        );
-        setShowQuoteForm(false);
-        setMessage({ type: 'success', text: 'Quote submitted successfully!' });
-    };
-
-    const handleAcceptQuote = (quoteId, providerId) => {
-        setConfirmMessage("By accepting this quote, your contact information (name, email, phone) will be shared with the selected provider. Do you wish to proceed?");
-        setConfirmAction(() => () => {
-            setMockProblems(prevProblems =>
-                prevProblems.map(p => {
-                    if (p.id === problem.id) {
-                        return {
-                            ...p,
-                            status: 'closed',
-                            acceptedQuoteId: quoteId,
-                            quotes: p.quotes.map(q =>
-                                q.id === quoteId ? { ...q, status: 'accepted' } : q
-                            )
-                        };
-                    }
-                    return p;
-                })
-            );
-            setMessage({ type: 'success', text: 'Quote accepted and problem closed! Provider contact details now available.' });
-            setShowConfirmModal(false);
-        });
-        setMessage({ type: '', text: '' }); // Clear existing message
-        setShowConfirmModal(true);
-    };
-
-
-    const handleMarkProblemResolved = () => {
-        setConfirmMessage("Are you sure you want to mark this problem as resolved? This cannot be undone.");
-        setConfirmAction(() => () => {
-            setMockProblems(prevProblems =>
-                prevProblems.map(p =>
-                    p.id === problem.id ? { ...p, status: 'resolved' } : p
-                )
-            );
-            setMessage({ type: 'success', text: 'Problem marked as resolved!' });
-            setShowConfirmModal(false);
-        });
-        setMessage({ type: '', text: '' }); // Clear existing message
-        setShowConfirmModal(true);
-    };
-
-    const handleDeleteProblem = () => {
-        setConfirmMessage("Are you sure you want to delete this problem and all associated quotes? This action is irreversible.");
-        setConfirmAction(() => () => {
-            setMockProblems(prevProblems => prevProblems.filter(p => p.id !== problem.id));
-            setMessage({ type: 'success', text: 'Problem and all associated quotes deleted successfully!' });
-            onNavigate('problems'); // Redirect after deletion
-            setShowConfirmModal(false);
-        });
-        setMessage({ type: '', text: '' }); // Clear existing message
-        setShowConfirmModal(true);
-    };
-
-    // Determine the accepted provider's ID for the modal
-    const acceptedProviderId = problem.quotes.find(q => q.id === problem.acceptedQuoteId)?.providerId;
-
-    // Check if current user (provider) has the accepted quote
-    const isCurrentProviderAccepted = userRole === 'provider' && acceptedProviderId === userId;
-
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <button
-                onClick={() => onNavigate('problems')}
-                className="mb-4 px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
-            >
-                &larr; Back to Problem List
-            </button>
-
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">{problem.title}</h2>
-
-            <div className="space-y-4 mb-8">
-                <p className="text-gray-700 text-lg">{problem.description}</p>
-                <p className="text-gray-600"><span className="font-semibold">Category:</span> {problem.category}</p>
-                <p className="text-gray-600"><span className="font-semibold">Location:</span> {problem.location}</p>
-                <p className="text-gray-600"><span className="font-semibold">Estimated Budget:</span> R{problem.estimatedBudget?.toFixed(2)}</p>
-                <p className="text-gray-600"><span className="font-semibold">Status:</span> <span className="capitalize">{problem.status}</span></p>
-                <p className="text-gray-500 text-sm">Posted on: {problem.createdAt?.toLocaleDateString()}</p>
-                {!problem.isApproved && (userRole === 'admin' || problem.requesterId === userId) && (
-                    <span className="px-3 py-1 text-sm font-semibold bg-red-100 text-red-800 rounded-full inline-block">Awaiting Admin Approval</span>
-                )}
-            </div>
-
-            {/* Provider Actions/Info */}
-            {userRole === 'provider' && userProfile.isProviderApproved && isProblemOpen && !hasQuoted && (
-                <button
-                    onClick={() => setShowQuoteForm(true)}
-                    className="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 text-lg flex items-center mb-6"
-                >
-                    <PlusCircleIcon size={20} className="mr-2" /> Submit a Quote
-                </button>
-            )}
-            {userRole === 'provider' && userProfile.isProviderApproved && hasQuoted && (
-                <p className="bg-yellow-100 text-yellow-800 p-3 rounded-md mb-6 font-semibold">
-                    You have already submitted a quote for this problem.
-                </p>
-            )}
-            {userRole === 'provider' && !userProfile.isProviderApproved && (
-                 <p className="bg-red-100 text-red-800 p-3 rounded-md mb-6 font-semibold">
-                    Your provider registration is pending approval. You cannot submit quotes yet.
-                </p>
-            )}
-            {userRole === 'provider' && problem.status === 'closed' && !isCurrentProviderAccepted && (
-                 <p className="bg-gray-100 text-gray-800 p-3 rounded-md mb-6 font-semibold">
-                    This problem has been closed and your quote was not accepted.
-                </p>
-            )}
-             {userRole === 'provider' && isCurrentProviderAccepted && (
-                 <p className="bg-green-100 text-green-800 p-3 rounded-md mb-6 font-semibold">
-                    Congratulations! Your quote for this problem was accepted.
-                </p>
-            )}
-
-
-            {/* Requester (Member) View - Quotes Management */}
-            {isRequester && (
-                <div className="mt-8">
-                    <h3 className="text-2xl font-bold text-gray-800 mb-4">Quotes Received ({problem.quotes.length})</h3>
-                    {!isPaidMember && problem.quotes.length > 0 && (
-                        <p className="bg-red-100 text-red-800 p-3 rounded-md mb-4 font-semibold">
-                            Upgrade to **paid membership** to view and manage these quotes.
-                        </p>
-                    )}
-                    {problem.quotes.length === 0 ? (
-                        <p className="text-gray-600">No quotes received for this problem yet.</p>
-                    ) : (
+        <div className="space-y-6">
+            {userRole === 'admin' && (
+                <div className="bg-white p-6 rounded-lg shadow">
+                    <h2 className="text-2xl font-semibold text-gray-800 mb-4">Admin Overview</h2>
+                    {pendingProblems.length > 0 ? (
                         <div className="space-y-4">
-                            {problem.quotes.map(quote => (
-                                <div key={quote.id} className="border border-gray-200 rounded-lg p-4 bg-gray-50 shadow-sm">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <h4 className="text-lg font-semibold text-gray-800">
-                                            Quote by: {isPaidMember || quote.status === 'accepted' ? quote.providerName : 'Confidential'}
-                                        </h4>
-                                        <span className={`px-2 py-1 rounded-full text-xs font-semibold capitalize ${
-                                            quote.status === 'accepted' ? 'bg-green-100 text-green-800' :
-                                            'bg-yellow-100 text-yellow-800'
-                                        }`}>
-                                            {quote.status}
-                                        </span>
-                                    </div>
-                                    <p className="text-gray-700 mb-1">Proposed Budget: <span className="font-bold">R{isPaidMember || quote.status === 'accepted' ? quote.amount?.toFixed(2) : '---'}</span></p>
-                                    <p className="text-gray-700 mb-1">Proposed Dates: {isPaidMember || quote.status === 'accepted' ? `${quote.proposedStartDate} to ${quote.proposedEndDate}` : '---'}</p>
-                                    <p className="text-gray-600 text-sm">Motivation: {isPaidMember || quote.status === 'accepted' ? quote.details : '---'}</p>
-                                    <p className="text-gray-500 text-xs mt-2">Quoted: {quote.createdAt?.toLocaleString()}</p>
+                            <h3 className="text-xl font-medium text-red-700">Pending Problems for Approval:</h3>
+                            {pendingProblems.map(problem => (
+                                <ProblemCard key={problem.id} problem={problem} userRole={userRole} userProfiles={userProfiles} />
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="text-gray-600">No problems pending approval.</p>
+                    )}
+                </div>
+            )}
 
-                                    {isPaidMember && isProblemOpen && quote.status === 'pending' && (
-                                        <div className="mt-4 flex justify-end">
-                                            <button
-                                                onClick={() => handleAcceptQuote(quote.id, quote.providerId)}
-                                                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 text-sm"
-                                            >
-                                                Accept Quote
-                                            </button>
-                                        </div>
+            <div className="bg-white p-6 rounded-lg shadow">
+                <h2 className="text-2xl font-semibold text-gray-800 mb-4">
+                    {userRole === 'member' ? 'My Posted Problems' : userRole === 'provider' ? 'Available Problems for Quoting' : 'All Approved Problems'}
+                </h2>
+                {approvedProblems.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {approvedProblems.map(problem => (
+                            <ProblemCard key={problem.id} problem={problem} userRole={userRole} userProfiles={userProfiles} currentUserId={userId} />
+                        ))}
+                    </div>
+                ) : (
+                    <p className="text-gray-600">No approved problems to display {userRole === 'member' && 'or you have not posted any problems yet'}.</p>
+                )}
+            </div>
+        </div>
+    );
+};
+
+
+// --- Problem Card Component ---
+const ProblemCard = ({ problem, userRole, userProfiles, currentUserId }) => {
+    const { updateProblemInFirestore, setMessage } = useContext(AppContext);
+    const [showQuoteModal, setShowQuoteModal] = useState(false);
+    const [showConfirmation, setShowConfirmation] = useState(false);
+    const [confirmationAction, setConfirmationAction] = useState(null); // 'delete' or 'approve'
+
+    const requesterName = userProfiles[problem.requesterId]?.name || 'Unknown User';
+    const requesterRole = userProfiles[problem.requesterId]?.role || 'N/A';
+
+    const handleApprove = async () => {
+        setConfirmationAction('approve');
+        setShowConfirmation(true);
+    };
+
+    const confirmApprove = async () => {
+        try {
+            await updateProblemInFirestore(problem.id, { isApproved: true });
+            setMessage({ type: 'success', text: `Problem "${problem.title}" approved!` });
+            setShowConfirmation(false);
+        } catch (error) {
+            console.error("Error approving problem:", error);
+            setMessage({ type: 'error', text: `Failed to approve problem: ${error.message}` });
+        }
+    };
+
+    const handleDelete = async () => {
+        setConfirmationAction('delete');
+        setShowConfirmation(true);
+    };
+
+    const confirmDelete = async () => {
+        try {
+            await useContext(AppContext).deleteProblemFromFirestore(problem.id);
+            setMessage({ type: 'success', text: `Problem "${problem.title}" deleted!` });
+            setShowConfirmation(false);
+        } catch (error) {
+            console.error("Error deleting problem:", error);
+            setMessage({ type: 'error', text: `Failed to delete problem: ${error.message}` });
+        }
+    };
+
+    const handlePostQuote = async (quoteDetails) => {
+        try {
+            const newQuote = {
+                id: crypto.randomUUID(),
+                providerId: currentUserId,
+                amount: parseFloat(quoteDetails.amount),
+                message: quoteDetails.message,
+                status: 'pending', // Initial status of a quote
+                createdAt: new Date().toISOString(),
+            };
+            const updatedQuotes = [...problem.quotes, newQuote];
+            await updateProblemInFirestore(problem.id, { quotes: updatedQuotes });
+            setMessage({ type: 'success', text: 'Quote posted successfully!' });
+            setShowQuoteModal(false);
+        } catch (error) {
+            console.error("Error posting quote:", error);
+            setMessage({ type: 'error', text: `Failed to post quote: ${error.message}` });
+        }
+    };
+
+    const handleAcceptQuote = async (quoteId) => {
+        try {
+            const updatedQuotes = problem.quotes.map(q =>
+                q.id === quoteId ? { ...q, status: 'accepted' } : { ...q, status: 'rejected' }
+            );
+            await updateProblemInFirestore(problem.id, { quotes: updatedQuotes, acceptedQuoteId: quoteId });
+            setMessage({ type: 'success', text: 'Quote accepted successfully! Provider notified.' });
+        } catch (error) {
+            console.error("Error accepting quote:", error);
+            setMessage({ type: 'error', text: `Failed to accept quote: ${error.message}` });
+        }
+    };
+
+    const hasQuoted = problem.quotes.some(q => q.providerId === currentUserId);
+    const acceptedProviderId = problem.acceptedQuoteId ? problem.quotes.find(q => q.id === problem.acceptedQuoteId)?.providerId : null;
+
+
+    return (
+        <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200 hover:shadow-lg transition-shadow duration-200">
+            <h3 className="text-xl font-bold text-gray-900 mb-2">{problem.title}</h3>
+            <p className="text-gray-700 text-sm mb-3">By: {requesterName} ({requesterRole})</p>
+            <p className="text-gray-600 mb-4 text-sm">{problem.description}</p>
+            <div className="flex justify-between items-center text-sm font-medium text-gray-800 mb-4">
+                <span>Category: <span className="font-semibold text-[#964b00]">{problem.category}</span></span>
+                <span>Budget: <span className="font-semibold text-green-600">R{problem.estimatedBudget?.toLocaleString()}</span></span>
+            </div>
+            <div className="text-sm text-gray-600 mb-4">
+                Location: <span className="font-medium">{problem.location}</span>
+            </div>
+            <div className="text-sm text-gray-600 mb-4">
+                Posted: <span className="font-medium">{problem.createdAt?.toLocaleDateString()}</span>
+            </div>
+
+
+            {userRole === 'admin' && !problem.isApproved && (
+                <div className="flex space-x-2 mt-4">
+                    <button
+                        onClick={handleApprove}
+                        className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 flex items-center justify-center"
+                    >
+                        <CheckCircleIcon size={18} className="mr-2" /> Approve
+                    </button>
+                    <button
+                        onClick={handleDelete}
+                        className="flex-1 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors duration-200 flex items-center justify-center"
+                    >
+                        <XCircleIcon size={18} className="mr-2" /> Delete
+                    </button>
+                </div>
+            )}
+
+            {problem.isApproved && (userRole === 'provider' || userRole === 'member' || userRole === 'admin') && (
+                <div className="mt-4 border-t pt-4">
+                    <h4 className="text-lg font-semibold text-gray-800 mb-3">Quotes ({problem.quotes.length})</h4>
+                    {problem.quotes.length > 0 ? (
+                        <div className="space-y-3 max-h-48 overflow-y-auto pr-2">
+                            {problem.quotes.map(quote => (
+                                <div key={quote.id} className={`p-3 rounded-md border ${quote.status === 'accepted' ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-gray-50'}`}>
+                                    <p className="text-gray-700 text-sm font-medium">Provider: {userProfiles[quote.providerId]?.name || 'Unknown'}</p>
+                                    <p className="text-gray-600 text-xs">Amount: R{quote.amount?.toLocaleString()}</p>
+                                    <p className="text-gray-600 text-xs italic">"{quote.message}"</p>
+                                    <p className={`text-xs font-semibold mt-1 ${quote.status === 'accepted' ? 'text-green-600' : 'text-gray-500'}`}>
+                                        Status: {quote.status.charAt(0).toUpperCase() + quote.status.slice(1)}
+                                    </p>
+                                    {userRole === 'member' && problem.requesterId === currentUserId && !problem.acceptedQuoteId && quote.status === 'pending' && (
+                                        <button
+                                            onClick={() => handleAcceptQuote(quote.id)}
+                                            className="mt-2 px-3 py-1 bg-[#964b00] text-white text-xs rounded-md hover:bg-[#b3641a] transition-colors duration-200"
+                                        >
+                                            Accept Quote
+                                        </button>
                                     )}
-                                    {hasAcceptedQuote && quote.status === 'accepted' && (
-                                        <p className="mt-4 text-green-600 font-bold text-sm">This quote has been accepted!</p>
-                                    )}
-                                     {hasAcceptedQuote && quote.status === 'pending' && (
-                                        <p className="mt-4 text-gray-600 font-bold text-sm">Another quote was accepted for this problem.</p>
+                                    {problem.acceptedQuoteId === quote.id && (
+                                        <span className="mt-2 ml-2 px-3 py-1 bg-green-500 text-white text-xs rounded-md">Accepted</span>
                                     )}
                                 </div>
                             ))}
                         </div>
+                    ) : (
+                        <p className="text-gray-600 text-sm">No quotes yet.</p>
                     )}
-
-                    {problem.status === 'closed' && hasAcceptedQuote && (
-                        <div className="mt-6 p-4 bg-blue-50 rounded-md border border-blue-200">
-                            <h4 className="font-bold text-blue-800 mb-2">Accepted Quote Details:</h4>
-                            <p>Provider: {problem.quotes.find(q => q.id === problem.acceptedQuoteId)?.providerName}</p>
-                            <p>Amount: R{problem.quotes.find(q => q.id === problem.acceptedQuoteId)?.amount?.toFixed(2)}</p>
-                            <button
-                                onClick={() => setShowProviderDetailsModal(true)}
-                                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 text-sm flex items-center"
-                            >
-                                <UserIcon size={18} className="mr-2" /> View Provider Contact Details
-                            </button>
+                    {userRole === 'provider' && problem.isApproved && !hasQuoted && !problem.acceptedQuoteId && (
+                        <button
+                            onClick={() => setShowQuoteModal(true)}
+                            className="mt-4 w-full px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200"
+                        >
+                            Post a Quote
+                        </button>
+                    )}
+                    {userRole === 'member' && problem.acceptedQuoteId && problem.requesterId === currentUserId && (
+                        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md text-blue-800 text-sm">
+                            <p>You have accepted a quote for this problem.</p>
+                            <p>Accepted Provider: {userProfiles[acceptedProviderId]?.name || 'Unknown'}</p>
                         </div>
                     )}
-                     {problem.status === 'closed' && hasAcceptedQuote && (
-                        <button
-                            onClick={handleMarkProblemResolved}
-                            className="mt-6 px-6 py-3 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200 text-lg flex items-center"
-                        >
-                            <CheckCircleIcon size={20} className="mr-2" /> Mark as Resolved
-                        </button>
+                     {userRole === 'provider' && hasQuoted && !problem.acceptedQuoteId && (
+                        <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md text-yellow-800 text-sm">
+                            <p>You have already quoted for this problem.</p>
+                        </div>
                     )}
-                    {isProblemOpen && (
-                        <button
-                            onClick={handleDeleteProblem}
-                            className="mt-6 px-6 py-3 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 text-lg flex items-center"
-                        >
-                            <XCircleIcon size={20} className="mr-2" /> Delete Problem
-                        </button>
+                    {userRole === 'provider' && hasQuoted && problem.acceptedQuoteId && (
+                        <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-md text-green-800 text-sm">
+                            <p>The requester has accepted a quote for this problem.</p>
+                        </div>
                     )}
                 </div>
             )}
-
-            {showQuoteForm && (
-                <QuoteModal
-                    onClose={() => setShowQuoteForm(false)}
-                    onSubmit={handleSendQuote}
-                    problemTitle={problem.title}
+            {showQuoteModal && (
+                <PostQuoteModal
+                    onClose={() => setShowQuoteModal(false)}
+                    onPostQuote={handlePostQuote}
                 />
             )}
-            {showMemberDetailsModal && (
-                <MemberDetailsModal
-                    onClose={() => setShowMemberDetailsModal(false)}
-                    memberId={problem.requesterId}
-                />
-            )}
-            {showProviderDetailsModal && acceptedProviderId && (
-                <ProviderDetailsModal
-                    onClose={() => setShowProviderDetailsModal(false)}
-                    providerId={acceptedProviderId}
-                />
-            )}
-            {showConfirmModal && (
+            {showConfirmation && (
                 <ConfirmationModal
-                    message={confirmMessage}
-                    onConfirm={confirmAction}
-                    onCancel={() => setShowConfirmModal(false)}
+                    message={`Are you sure you want to ${confirmationAction === 'approve' ? 'approve' : 'delete'} this problem "${problem.title}"?`}
+                    onConfirm={confirmationAction === 'approve' ? confirmApprove : confirmDelete}
+                    onCancel={() => setShowConfirmation(false)}
+                    confirmText={confirmationAction === 'approve' ? 'Approve' : 'Delete'}
                 />
             )}
         </div>
@@ -2131,115 +973,283 @@ const ProblemDetailPage = ({ problem, onNavigate }) => {
 };
 
 
-// PostProblemModal component (for members to post problems)
-const PostProblemModal = ({ onClose, onSave, activeProblemsCount, isPaidMember }) => {
-    const [title, setTitle] = useState('');
-    const [description, setDescription] = useState('');
-    const [category, setCategory] = useState('');
-    const [location, setLocation] = useState('');
-    const [estimatedBudget, setEstimatedBudget] = useState('');
-    const [formError, setFormError] = useState('');
+// --- Profile Page Component ---
+const ProfilePage = ({ userProfile, updateUserProfile }) => {
+    const { setMessage } = useContext(AppContext);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editableProfile, setEditableProfile] = useState({ ...userProfile });
 
-    const MAX_FREE_PROBLEMS = 5;
+    useEffect(() => {
+        setEditableProfile({ ...userProfile });
+    }, [userProfile]);
+
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setEditableProfile(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSave = async () => {
+        try {
+            await updateUserProfile(editableProfile.uid, editableProfile);
+            setIsEditing(false);
+            setMessage({ type: 'success', text: 'Profile saved successfully!' });
+        } catch (error) {
+            console.error("Error saving profile:", error);
+            setMessage({ type: 'error', text: `Failed to save profile: ${error.message}` });
+        }
+    };
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-2xl font-semibold text-gray-800 mb-4">My Profile</h2>
+            <div className="space-y-4">
+                <div>
+                    <label className="block text-gray-700 text-sm font-bold mb-2">Name:</label>
+                    {isEditing ? (
+                        <input
+                            type="text"
+                            name="name"
+                            value={editableProfile.name || ''}
+                            onChange={handleChange}
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                        />
+                    ) : (
+                        <p className="text-gray-800">{userProfile?.name}</p>
+                    )}
+                </div>
+                <div>
+                    <label className="block text-gray-700 text-sm font-bold mb-2">Email:</label>
+                    <p className="text-gray-800">{userProfile?.email}</p>
+                </div>
+                <div>
+                    <label className="block text-gray-700 text-sm font-bold mb-2">Role:</label>
+                    <p className="text-gray-800 capitalize">{userProfile?.role}</p>
+                </div>
+                <div>
+                    <label className="block text-gray-700 text-sm font-bold mb-2">Phone:</label>
+                    {isEditing ? (
+                        <input
+                            type="text"
+                            name="phone"
+                            value={editableProfile.phone || ''}
+                            onChange={handleChange}
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                        />
+                    ) : (
+                        <p className="text-gray-800">{userProfile?.phone || 'N/A'}</p>
+                    )}
+                </div>
+                <div>
+                    <label className="block text-gray-700 text-sm font-bold mb-2">Address:</label>
+                    {isEditing ? (
+                        <input
+                            type="text"
+                            name="address"
+                            value={editableProfile.address || ''}
+                            onChange={handleChange}
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                        />
+                    ) : (
+                        <p className="text-gray-800">{userProfile?.address || 'N/A'}</p>
+                    )}
+                </div>
+                <div>
+                    <label className="block text-gray-700 text-sm font-bold mb-2">Bio:</label>
+                    {isEditing ? (
+                        <textarea
+                            name="bio"
+                            value={editableProfile.bio || ''}
+                            onChange={handleChange}
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            rows="4"
+                        ></textarea>
+                    ) : (
+                        <p className="text-gray-800 whitespace-pre-wrap">{userProfile?.bio || 'N/A'}</p>
+                    )}
+                </div>
+
+                {userProfile?.role === 'provider' && (
+                    <>
+                        <div>
+                            <label className="block text-gray-700 text-sm font-bold mb-2">Company Name:</label>
+                            {isEditing ? (
+                                <input
+                                    type="text"
+                                    name="companyName"
+                                    value={editableProfile.companyName || ''}
+                                    onChange={handleChange}
+                                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                />
+                            ) : (
+                                <p className="text-gray-800">{userProfile?.companyName || 'N/A'}</p>
+                            )}
+                        </div>
+                        <div>
+                            <label className="block text-gray-700 text-sm font-bold mb-2">Specialties (comma-separated):</label>
+                            {isEditing ? (
+                                <input
+                                    type="text"
+                                    name="specialties"
+                                    value={editableProfile.specialties ? (Array.isArray(editableProfile.specialties) ? editableProfile.specialties.join(', ') : editableProfile.specialties) : ''}
+                                    onChange={(e) => {
+                                        setEditableProfile(prev => ({
+                                            ...prev,
+                                            specialties: e.target.value.split(',').map(s => s.trim())
+                                        }));
+                                    }}
+                                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                />
+                            ) : (
+                                <p className="text-gray-800">{userProfile?.specialties?.join(', ') || 'N/A'}</p>
+                            )}
+                        </div>
+                        <div>
+                            <label className="block text-gray-700 text-sm font-bold mb-2">Provider Status:</label>
+                            <p className={`font-semibold ${userProfile?.isProviderApproved ? 'text-green-600' : 'text-red-600'}`}>
+                                {userProfile?.isProviderApproved ? 'Approved' : 'Pending Approval'}
+                            </p>
+                        </div>
+                    </>
+                )}
+
+                {userProfile?.role === 'member' && (
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Membership Status:</label>
+                        <p className={`font-semibold ${userProfile?.isPaidMember ? 'text-blue-600' : 'text-yellow-600'}`}>
+                            {userProfile?.isPaidMember ? 'Paid Member' : 'Free Member'}
+                        </p>
+                        {!userProfile?.isPaidMember && (
+                            <button
+                                onClick={() => useContext(AppContext).setCurrentPage('pricing')}
+                                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200"
+                            >
+                                Upgrade to Paid Membership
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                <div className="flex justify-end space-x-4 mt-6">
+                    {isEditing ? (
+                        <>
+                            <button
+                                onClick={() => {
+                                    setIsEditing(false);
+                                    setEditableProfile({ ...userProfile });
+                                }}
+                                className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleSave}
+                                className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200"
+                            >
+                                Save Changes
+                            </button>
+                        </>
+                    ) : (
+                        <button
+                            onClick={() => setIsEditing(true)}
+                            className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200"
+                        >
+                            <EditIcon size={18} className="inline-block mr-2" /> Edit Profile
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
+// --- Post Problem Modal Component ---
+const PostProblemModal = ({ onClose, onPost }) => {
+    const [problemTitle, setProblemTitle] = useState('');
+    const [problemDescription, setProblemDescription] = useState('');
+    const [problemCategory, setProblemCategory] = useState('Plumbing');
+    const [problemLocation, setProblemLocation] = useState('');
+    const [estimatedBudget, setEstimatedBudget] = useState('');
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        setFormError('');
-
-        if (!title || !description || !category || !location || !estimatedBudget) {
-            setFormError('All fields are required.');
-            return;
-        }
-        if (isNaN(estimatedBudget) || parseFloat(estimatedBudget) <= 0) {
-            setFormError('Budget must be a positive number.');
-            return;
-        }
-
-        if (!isPaidMember && activeProblemsCount >= MAX_FREE_PROBLEMS) {
-            setFormError(`Free members are limited to ${MAX_FREE_PROBLEMS} active problems. Please upgrade to post more.`);
-            return;
-        }
-
-        onSave({ title, description, category, location, estimatedBudget });
-        onClose();
+        onPost({
+            title: problemTitle,
+            description: problemDescription,
+            category: problemCategory,
+            location: problemLocation,
+            estimatedBudget: parseFloat(estimatedBudget),
+        });
     };
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">Post a New Problem</h3>
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-lg">
+                <h2 className="text-2xl font-bold text-gray-800 mb-6">Post a New Problem</h2>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemTitle">
-                            Problem Title
-                        </label>
+                        <label htmlFor="title" className="block text-gray-700 text-sm font-bold mb-2">Problem Title:</label>
                         <input
                             type="text"
-                            id="problemTitle"
+                            id="title"
+                            value={problemTitle}
+                            onChange={(e) => setProblemTitle(e.target.value)}
                             className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={title}
-                            onChange={(e) => setTitle(e.target.value)}
                             required
                         />
                     </div>
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemDescription">
-                            Description
-                        </label>
+                        <label htmlFor="description" className="block text-gray-700 text-sm font-bold mb-2">Description:</label>
                         <textarea
-                            id="problemDescription"
-                            rows="4"
+                            id="description"
+                            value={problemDescription}
+                            onChange={(e) => setProblemDescription(e.target.value)}
                             className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
+                            rows="4"
                             required
                         ></textarea>
                     </div>
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemCategory">
-                            Category
-                        </label>
+                        <label htmlFor="category" className="block text-gray-700 text-sm font-bold mb-2">Category:</label>
+                        <select
+                            id="category"
+                            value={problemCategory}
+                            onChange={(e) => setProblemCategory(e.target.value)}
+                            className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            required
+                        >
+                            <option value="Plumbing">Plumbing</option>
+                            <option value="Electrical">Electrical</option>
+                            <option value="Construction">Construction</option>
+                            <option value="Gardening">Gardening</option>
+                            <option value="Cleaning">Cleaning</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label htmlFor="location" className="block text-gray-700 text-sm font-bold mb-2">Location:</label>
                         <input
                             type="text"
-                            id="problemCategory"
+                            id="location"
+                            value={problemLocation}
+                            onChange={(e) => setProblemLocation(e.target.value)}
                             className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={category}
-                            onChange={(e) => setCategory(e.target.value)}
                             required
                         />
                     </div>
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemLocation">
-                            Location
-                        </label>
-                        <input
-                            type="text"
-                            id="problemLocation"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={location}
-                            onChange={(e) => setLocation(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="estimatedBudget">
-                            Estimated Budget (R)
-                        </label>
+                        <label htmlFor="budget" className="block text-gray-700 text-sm font-bold mb-2">Estimated Budget (R):</label>
                         <input
                             type="number"
-                            id="estimatedBudget"
-                            step="0.01"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            id="budget"
                             value={estimatedBudget}
                             onChange={(e) => setEstimatedBudget(e.target.value)}
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            min="0"
+                            step="0.01"
                             required
                         />
                     </div>
-
-                    {formError && (
-                        <p className="text-red-500 text-sm">{formError}</p>
-                    )}
-
                     <div className="flex justify-end space-x-4 mt-6">
                         <button
                             type="button"
@@ -2250,7 +1260,7 @@ const PostProblemModal = ({ onClose, onSave, activeProblemsCount, isPaidMember }
                         </button>
                         <button
                             type="submit"
-                            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
+                            className="px-6 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200"
                         >
                             Post Problem
                         </button>
@@ -2262,97 +1272,479 @@ const PostProblemModal = ({ onClose, onSave, activeProblemsCount, isPaidMember }
 };
 
 
-// QuoteModal (for providers to submit quotes) - Now used directly in ProblemDetailPage
-const QuoteModal = ({ onClose, onSubmit, problemTitle }) => {
-    const [proposedStartDate, setProposedStartDate] = useState('');
-    const [proposedEndDate, setProposedEndDate] = useState('');
-    const [proposedBudget, setProposedBudget] = useState('');
-    const [motivation, setMotivation] = useState('');
-    const [formError, setFormError] = useState('');
+// --- Register Modal Component ---
+const RegisterModal = ({ onClose, onRegister, onSelectPlan, pricingPlans, auth0User }) => {
+    const [name, setName] = useState(auth0User?.name || '');
+    const [email, setEmail] = useState(auth0User?.email || '');
+    const [phone, setPhone] = useState('');
+    const [address, setAddress] = useState('');
+    const [bio, setBio] = useState('');
+    // Password fields are removed as Auth0 handles user passwords
+    const [role, setRole] = useState('member');
+    const [companyName, setCompanyName] = useState('');
+    const [specialties, setSpecialties] = useState('');
+    const [selectedPricingPlanId, setSelectedPricingPlanId] = useState('');
+
+    const { setMessage } = useContext(AppContext);
+
+    useEffect(() => {
+        if (pricingPlans.length > 0 && !selectedPricingPlanId) {
+            setSelectedPricingPlanId(pricingPlans[0].id);
+        }
+    }, [pricingPlans, selectedPricingPlanId]);
+
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        setFormError('');
 
-        if (!proposedStartDate || !proposedEndDate || !proposedBudget || !motivation) {
-            setFormError('All fields are required.');
-            return;
-        }
-        if (isNaN(proposedBudget) || parseFloat(proposedBudget) <= 0) {
-            setFormError('Proposed Budget must be a positive number.');
-            return;
-        }
-        if (new Date(proposedStartDate) > new Date(proposedEndDate)) {
-            setFormError('Proposed Start Date cannot be after Proposed End Date.');
-            return;
-        }
+        // No password check needed here, Auth0 handles it.
 
-        onSubmit({ proposedStartDate, proposedEndDate, proposedBudget: parseFloat(proposedBudget), motivation });
+        const isPaid = role === 'member' && selectedPricingPlanId && pricingPlans.find(p => p.id === selectedPricingPlanId && p.rawPrice > 0);
+
+        onRegister({
+            uid: auth0User.sub, // Use Auth0's user.sub as the UID
+            name,
+            email,
+            phone,
+            address,
+            bio,
+            companyName: role === 'provider' ? companyName : undefined,
+            specialties: role === 'provider' ? specialties.split(',').map(s => s.trim()) : undefined,
+        }, role, isPaid);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl my-8">
+                <h2 className="text-2xl font-bold text-gray-800 mb-6">Complete Your Registration</h2>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label htmlFor="reg-name" className="block text-gray-700 text-sm font-bold mb-2">Name:</label>
+                        <input type="text" id="reg-name" value={name} onChange={(e) => setName(e.target.value)}
+                               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" required />
+                    </div>
+                    <div>
+                        <label htmlFor="reg-email" className="block text-gray-700 text-sm font-bold mb-2">Email:</label>
+                        <input type="email" id="reg-email" value={email} onChange={(e) => setEmail(e.target.value)}
+                               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" required readOnly />
+                    </div>
+                    <div>
+                        <label htmlFor="reg-phone" className="block text-gray-700 text-sm font-bold mb-2">Phone:</label>
+                        <input type="text" id="reg-phone" value={phone} onChange={(e) => setPhone(e.target.value)}
+                               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" />
+                    </div>
+                    <div>
+                        <label htmlFor="reg-address" className="block text-gray-700 text-sm font-bold mb-2">Address:</label>
+                        <input type="text" id="reg-address" value={address} onChange={(e) => setAddress(e.target.value)}
+                               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" />
+                    </div>
+                    <div>
+                        <label htmlFor="reg-bio" className="block text-gray-700 text-sm font-bold mb-2">Bio:</label>
+                        <textarea id="reg-bio" value={bio} onChange={(e) => setBio(e.target.value)}
+                                  className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" rows="3"></textarea>
+                    </div>
+                    {/* Password fields removed as Auth0 manages this */}
+                    <div>
+                        <label htmlFor="reg-role" className="block text-gray-700 text-sm font-bold mb-2">Register as:</label>
+                        <select id="reg-role" value={role} onChange={(e) => setRole(e.target.value)}
+                                className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" required>
+                            <option value="member">Member</option>
+                            <option value="provider">Service Provider</option>
+                        </select>
+                    </div>
+
+                    {role === 'provider' && (
+                        <>
+                            <div>
+                                <label htmlFor="companyName" className="block text-gray-700 text-sm font-bold mb-2">Company Name:</label>
+                                <input type="text" id="companyName" value={companyName} onChange={(e) => setCompanyName(e.target.value)}
+                                       className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" />
+                            </div>
+                            <div>
+                                <label htmlFor="specialties" className="block text-gray-700 text-sm font-bold mb-2">Specialties (comma-separated):</label>
+                                <input type="text" id="specialties" value={specialties} onChange={(e) => setSpecialties(e.target.value)}
+                                       className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" />
+                            </div>
+                        </>
+                    )}
+
+                    {role === 'member' && pricingPlans.length > 0 && (
+                        <div>
+                            <label htmlFor="pricingPlan" className="block text-gray-700 text-sm font-bold mb-2">Select Pricing Plan:</label>
+                            <select id="pricingPlan" value={selectedPricingPlanId} onChange={(e) => {
+                                setSelectedPricingPlanId(e.target.value);
+                                onSelectPlan(pricingPlans.find(p => p.id === e.target.value));
+                            }}
+                                    className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" required>
+                                {pricingPlans.map(plan => (
+                                    <option key={plan.id} value={plan.id}>{plan.name} - {plan.price}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+
+
+                    <div className="flex justify-end space-x-4 mt-6">
+                        <button type="button" onClick={onClose}
+                                className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">
+                            Cancel
+                        </button>
+                        <button type="submit"
+                                className="px-6 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200">
+                            Complete Registration
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
+// --- Provider Dashboard Component ---
+const ProviderDashboard = ({ problems, userProfiles, userId }) => {
+    const relevantProblems = problems.filter(problem =>
+        problem.isApproved && (
+            problem.quotes.some(quote => quote.providerId === userId) ||
+            (problem.acceptedQuoteId && problem.quotes.find(q => q.id === problem.acceptedQuoteId)?.providerId === userId)
+        )
+    );
+
+    const problemsQuotedByMe = relevantProblems.filter(problem => problem.quotes.some(q => q.providerId === userId));
+    const problemsWithMyQuoteAccepted = relevantProblems.filter(problem => problem.acceptedQuoteId && problem.quotes.find(q => q.id === problem.acceptedQuoteId)?.providerId === userId);
+
+    // Removed `quotesReceivedCount` since it was marked as unused in ESLint warnings.
+
+    return (
+        <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-700">Problems Quoted</h3>
+                        <p className="text-3xl font-bold text-[#964b00]">{problemsQuotedByMe.length}</p>
+                    </div>
+                    <FileTextIcon size={40} className="text-gray-400" />
+                </div>
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-700">Accepted Quotes</h3>
+                        <p className="text-3xl font-bold text-green-600">{problemsWithMyQuoteAccepted.length}</p>
+                    </div>
+                    <CheckCircle2Icon size={40} className="text-gray-400" />
+                </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow-md">
+                <h2 className="text-2xl font-semibold text-gray-800 mb-4">My Quotes & Accepted Jobs</h2>
+                {relevantProblems.length > 0 ? (
+                    <div className="space-y-4">
+                        {relevantProblems.map(problem => (
+                            <div key={problem.id} className="border border-gray-200 rounded-lg p-4">
+                                <h3 className="text-xl font-bold text-gray-900 mb-2">{problem.title}</h3>
+                                <p className="text-gray-600 text-sm mb-2">{problem.description}</p>
+                                <div className="flex justify-between items-center text-sm font-medium text-gray-800 mb-2">
+                                    <span>Category: <span className="font-semibold text-[#964b00]">{problem.category}</span></span>
+                                    <span>Budget: <span className="font-semibold text-green-600">R{problem.estimatedBudget?.toLocaleString()}</span></span>
+                                </div>
+
+                                <div className="mt-3">
+                                    <h4 className="text-md font-semibold text-gray-700">My Quotes:</h4>
+                                    {problem.quotes.filter(q => q.providerId === userId).map(quote => (
+                                        <div key={quote.id} className={`p-2 rounded-md mt-2 ${quote.status === 'accepted' ? 'bg-green-100 border-green-400' : 'bg-gray-100 border-gray-200'} border`}>
+                                            <p className="text-sm">Amount: R{quote.amount?.toLocaleString()}</p>
+                                            <p className="text-xs italic">"{quote.message}"</p>
+                                            <p className={`text-xs font-semibold mt-1 ${quote.status === 'accepted' ? 'text-green-600' : 'text-gray-500'}`}>
+                                                Status: {quote.status.charAt(0).toUpperCase() + quote.status.slice(1)}
+                                            </p>
+                                            {quote.status === 'accepted' && (
+                                                <p className="text-xs text-green-700 mt-1 font-bold">This quote was accepted!</p>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <p className="text-gray-600">You haven't quoted on any problems yet, or no quotes have been accepted.</p>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// --- Admin Panel Component ---
+const AdminPanel = ({ userProfiles, problems }) => {
+    const { updateProblemInFirestore, setUserProfile, setMessage } = useContext(AppContext);
+    const { canAccess } = usePermissions(); // Use the permissions hook here
+    const [showConfirmation, setShowConfirmation] = useState(false);
+    const [confirmationMessage, setConfirmationMessage] = useState('');
+    const [confirmActionCallback, setConfirmActionCallback] = useState(null);
+
+    const pendingProviders = Object.values(userProfiles).filter(p => p.role === 'provider' && !p.isProviderApproved);
+    const allProblems = problems;
+
+    const handleApproveProvider = (uid, name) => {
+        setConfirmationMessage(`Are you sure you want to approve provider "${name}"?`);
+        setConfirmActionCallback(() => async () => {
+            try {
+                await setUserProfile(uid, { isProviderApproved: true });
+                setMessage({ type: 'success', text: `Provider "${name}" approved successfully!` });
+            } catch (error) {
+                setMessage({ type: 'error', text: `Failed to approve provider: ${error.message}` });
+            } finally {
+                setShowConfirmation(false);
+            }
+        });
+        setShowConfirmation(true);
+    };
+
+    const handleDeleteUser = (uid, name) => {
+        setConfirmationMessage(`Are you sure you want to DELETE user "${name}"? This action cannot be undone.`);
+        setConfirmActionCallback(() => async () => {
+            setMessage({ type: 'success', text: `User "${name}" deleted (demo only - no actual DB delete).` });
+            const newProfiles = { ...userProfiles };
+            delete newProfiles[uid];
+            console.log(`User ${uid} deleted.`);
+            setShowConfirmation(false);
+        });
+        setShowConfirmation(true);
+    };
+
+
+    return (
+        <div className="space-y-6">
+            <div className="bg-white p-6 rounded-lg shadow-md">
+                <h2 className="text-2xl font-semibold text-gray-800 mb-4">Pending Provider Approvals</h2>
+                {pendingProviders.length > 0 ? (
+                    <div className="space-y-4">
+                        {pendingProviders.map(profile => (
+                            <div key={profile.uid} className="p-4 border rounded-md bg-gray-50 flex justify-between items-center">
+                                <div>
+                                    <p className="font-semibold text-gray-800">{profile.name} ({profile.email})</p>
+                                    <p className="text-sm text-gray-600">Company: {profile.companyName || 'N/A'}</p>
+                                    <p className="text-sm text-gray-600">Specialties: {profile.specialties?.join(', ') || 'N/A'}</p>
+                                </div>
+                                {/* Example of using canAccess for a button */}
+                                {canAccess('admin') && (
+                                    <button
+                                        onClick={() => handleApproveProvider(profile.uid, profile.name)}
+                                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
+                                    >
+                                        Approve
+                                    </button>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <p className="text-gray-600">No providers pending approval.</p>
+                )}
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow-md">
+                <h2 className="text-2xl font-semibold text-gray-800 mb-4">All Registered Users</h2>
+                {Object.values(userProfiles).length > 0 ? (
+                    <div className="space-y-4">
+                        {Object.values(userProfiles).map(profile => (
+                            <div key={profile.uid} className="p-4 border rounded-md bg-gray-50 flex justify-between items-center">
+                                <div>
+                                    <p className="font-semibold text-gray-800">{profile.name} ({profile.email})</p>
+                                    <p className="text-sm text-gray-600 capitalize">Role: {profile.role}</p>
+                                    {profile.role === 'provider' && (
+                                        <p className={`text-sm font-medium ${profile.isProviderApproved ? 'text-green-600' : 'text-red-600'}`}>
+                                            Status: {profile.isProviderApproved ? 'Approved' : 'Pending'}
+                                        </p>
+                                    )}
+                                </div>
+                                {canAccess('admin') && ( // Only admins can see delete user button
+                                    <button
+                                        onClick={() => handleDeleteUser(profile.uid, profile.name)}
+                                        className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors duration-200"
+                                    >
+                                        Delete User (Demo)
+                                    </button>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <p className="text-gray-600">No users registered.</p>
+                )}
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow-md">
+                <h2 className="text-2xl font-semibold text-gray-800 mb-4">All Problems (Admin View)</h2>
+                {allProblems.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {allProblems.map(problem => (
+                            <ProblemCard key={problem.id} problem={problem} userRole="admin" userProfiles={userProfiles} />
+                        ))}
+                    </div>
+                ) : (
+                    <p className="text-gray-600">No problems posted yet.</p>
+                )}
+            </div>
+            {showConfirmation && (
+                <ConfirmationModal
+                    message={confirmationMessage}
+                    onConfirm={confirmActionCallback}
+                    onCancel={() => setShowConfirmation(false)}
+                    confirmText="Confirm"
+                />
+            )}
+        </div>
+    );
+};
+
+// --- Pricing Page Component ---
+const PricingPage = ({ pricingPlans }) => {
+    const { userRole, userProfile, handleBecomePaidMember, setSelectedPlan, setMessage } = useContext(AppContext);
+    const { canAccess } = usePermissions(); // Use the permissions hook
+    const [showConfirmation, setShowConfirmation] = useState(false);
+    const [selectedPlanForPurchase, setSelectedPlanForPurchase] = useState(null);
+
+    const handleSelectPlanForPurchase = (plan) => {
+        setSelectedPlanForPurchase(plan);
+        setShowConfirmation(true);
+    };
+
+    const confirmPurchase = async () => {
+        if (selectedPlanForPurchase && userProfile) {
+            try {
+                await handleBecomePaidMember(userProfile.uid, { ...userProfile, isPaidMember: true });
+                setMessage({ type: 'success', text: `You are now a paid member with the "${selectedPlanForPurchase.name}" plan!` });
+                setSelectedPlan(selectedPlanForPurchase);
+            } catch (error) {
+                setMessage({ type: 'error', text: `Failed to become paid member: ${error.message}` });
+            } finally {
+                setShowConfirmation(false);
+            }
+        }
+    };
+
+
+    return (
+        <div className="space-y-8">
+            <h2 className="text-3xl font-bold text-gray-800 text-center mb-6">Choose Your Plan</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                {pricingPlans.map(plan => (
+                    <div key={plan.id} className="bg-white rounded-lg shadow-xl p-8 flex flex-col items-center text-center border-2 border-gray-200 hover:border-[#964b00] transition-all duration-300">
+                        <PackageIcon size={48} className="text-[#964b00] mb-4" />
+                        <h3 className="text-2xl font-bold text-gray-900 mb-2">{plan.name}</h3>
+                        <p className="text-5xl font-extrabold text-[#964b00] mb-4">
+                            R{plan.rawPrice}{plan.interval === 'monthly' ? '/mo' : ''}
+                        </p>
+                        <ul className="text-gray-700 mb-6 space-y-2 text-left w-full">
+                            {plan.features?.map((feature, index) => (
+                                <li key={index} className="flex items-center">
+                                    <CheckCircleIcon size={18} className="text-green-500 mr-2" />
+                                    {feature}
+                                </li>
+                            ))}
+                        </ul>
+                        {canAccess('member') && !userProfile?.isPaidMember && plan.rawPrice > 0 && ( // Only members not paid can choose paid plans
+                            <button
+                                onClick={() => handleSelectPlanForPurchase(plan)}
+                                className="mt-auto w-full px-6 py-3 bg-[#964b00] text-white font-semibold rounded-lg hover:bg-[#b3641a] transition-colors duration-300 transform hover:scale-105"
+                            >
+                                Choose Plan
+                            </button>
+                        )}
+                        {canAccess('member') && userProfile?.isPaidMember && plan.rawPrice > 0 && ( // Members who are paid
+                            <span className="mt-auto w-full text-center py-3 text-green-600 font-semibold">
+                                Already a paid member!
+                            </span>
+                        )}
+                        {canAccess('member') && plan.rawPrice === 0 && ( // Members with free plan
+                            <span className="mt-auto w-full text-center py-3 text-gray-600 font-semibold">
+                                Free Plan
+                            </span>
+                        )}
+                        {canAccess('admin') && ( // Admins can edit/delete plans
+                            <div className="mt-auto w-full flex space-x-2">
+                                <button
+                                    onClick={() => { /* Implement edit logic */ alert('Edit Plan Not Implemented'); }}
+                                    className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                                >
+                                    Edit
+                                </button>
+                                <button
+                                    onClick={() => useContext(AppContext).deletePricingPlanFromFirestore(plan.id, plan.name)}
+                                    className="flex-1 px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600"
+                                >
+                                    Delete
+                                </button>
+                            </div>
+                        )}
+                        {canAccess('provider') && ( // Providers see pricing for members (read-only)
+                            <span className="mt-auto w-full text-center py-3 text-gray-600 font-semibold">
+                                Pricing for Members
+                            </span>
+                        )}
+                    </div>
+                ))}
+                {canAccess('admin') && ( // Only admins can add new plans
+                    <button
+                        onClick={() => { /* Implement add new plan modal */ alert('Add Plan Not Implemented'); }}
+                        className="bg-gray-200 text-gray-700 rounded-lg shadow-md p-8 flex flex-col items-center justify-center border-2 border-dashed border-gray-400 hover:border-[#964b00] hover:bg-gray-300 transition-all duration-300"
+                    >
+                        <PlusCircleIcon size={48} className="text-gray-500 mb-2" />
+                        <span className="text-lg font-semibold">Add New Plan</span>
+                    </button>
+                )}
+            </div>
+            {showConfirmation && (
+                <ConfirmationModal
+                    message={`Are you sure you want to purchase the "${selectedPlanForPurchase?.name}" plan for R${selectedPlanForPurchase?.rawPrice}?`}
+                    onConfirm={confirmPurchase}
+                    onCancel={() => setShowConfirmation(false)}
+                    confirmText="Proceed to Payment"
+                />
+            )}
+        </div>
+    );
+};
+
+// --- Post Quote Modal Component ---
+const PostQuoteModal = ({ onClose, onPostQuote }) => {
+    const [amount, setAmount] = useState('');
+    const [message, setMessage] = useState('');
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onPostQuote({ amount: parseFloat(amount), message });
     };
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">Submit a Quote for "{problemTitle}"</h3>
+                <h2 className="text-2xl font-bold text-gray-800 mb-6">Post Your Quote</h2>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="proposedStartDate">
-                            Proposed Start Date
-                        </label>
-                        <input
-                            type="date"
-                            id="proposedStartDate"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={proposedStartDate}
-                            onChange={(e) => setProposedStartDate(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="proposedEndDate">
-                            Proposed End Date
-                        </label>
-                        <input
-                            type="date"
-                            id="proposedEndDate"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={proposedEndDate}
-                            onChange={(e) => setProposedEndDate(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="proposedBudget">
-                            Proposed Budget (R)
-                        </label>
+                        <label htmlFor="quote-amount" className="block text-gray-700 text-sm font-bold mb-2">Quote Amount (R):</label>
                         <input
                             type="number"
-                            id="proposedBudget"
-                            step="0.01"
+                            id="quote-amount"
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
                             className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={proposedBudget}
-                            onChange={(e) => setProposedBudget(e.target.value)}
+                            min="0"
+                            step="0.01"
                             required
                         />
                     </div>
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="motivation">
-                            Motivation / Details of Work
-                        </label>
+                        <label htmlFor="quote-message" className="block text-gray-700 text-sm font-bold mb-2">Message:</label>
                         <textarea
-                            id="motivation"
-                            rows="5"
+                            id="quote-message"
+                            value={message}
+                            onChange={(e) => setMessage(e.target.value)}
                             className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={motivation}
-                            onChange={(e) => setMotivation(e.target.value)}
+                            rows="4"
                             required
                         ></textarea>
                     </div>
-
-                    {formError && (
-                        <p className="text-red-500 text-sm">{formError}</p>
-                    )}
-
                     <div className="flex justify-end space-x-4 mt-6">
                         <button
                             type="button"
@@ -2374,939 +1766,73 @@ const QuoteModal = ({ onClose, onSubmit, problemTitle }) => {
     );
 };
 
-// MemberDetailsModal (Only for accepted providers to view member details)
-const MemberDetailsModal = ({ onClose, memberId }) => {
-    const { userRole, mockUserProfiles, setMessage } = useContext(AppContext);
-    const [memberDetails, setMemberDetails] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+// --- Branding Settings Component ---
+const BrandingSettings = ({ appName, appLogo, updateBranding }) => {
+    const { setMessage } = useContext(AppContext);
+    const { canAccess } = usePermissions(); // Use the permissions hook
+    const [newAppName, setNewAppName] = useState(appName);
+    const [newAppLogo, setNewAppLogo] = useState(appLogo);
 
     useEffect(() => {
-        if (userRole !== 'provider') {
-            setError('Access denied. Only the accepted provider can view member details.');
-            setLoading(false);
-            return;
+        setNewAppName(appName);
+        setNewAppLogo(appLogo);
+    }, [appName, appLogo]);
+
+    const handleSaveBranding = async () => {
+        try {
+            await updateBranding(newAppName, newAppLogo);
+            setMessage({ type: 'success', text: 'Branding updated successfully!' });
+        } catch (error) {
+            setMessage({ type: 'error', text: `Failed to update branding: ${error.message}` });
         }
-
-        setTimeout(() => {
-            const details = mockUserProfiles[memberId];
-            if (details) {
-                setMemberDetails(details);
-            } else {
-                setError('Member details not found.');
-            }
-            setLoading(false);
-        }, 300);
-    }, [memberId, userRole, mockUserProfiles]);
-
-
-    return (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">Member Details</h3>
-                {loading ? (
-                    <p>Loading...</p>
-                ) : error ? (
-                    <p className="text-red-500">{error}</p>
-                ) : memberDetails ? (
-                    <div className="space-y-4">
-                        <p><span className="font-semibold">Name:</span> {memberDetails.name}</p>
-                        <p><span className="font-semibold">Email:</span> {memberDetails.email || 'N/A'}</p>
-                        <p><span className="font-semibold">Phone:</span> {memberDetails.phone || 'N/A'}</p>
-                        <p><span className="font-semibold">Address:</span> {memberDetails.address || 'N/A'}</p>
-                        <p><span className="font-semibold">Bio:</span> {memberDetails.bio || 'N/A'}</p>
-                    </div>
-                ) : (
-                    <p>No details found.</p>
-                )}
-                <div className="flex justify-end mt-6">
-                    <button
-                        onClick={onClose}
-                        className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
-                    >
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// ProviderDetailsModal (for members to view accepted provider's details)
-const ProviderDetailsModal = ({ onClose, providerId }) => {
-    const { userRole, mockUserProfiles, setMessage } = useContext(AppContext);
-    const [providerDetails, setProviderDetails] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-
-    useEffect(() => {
-        if (userRole !== 'member') { // Only members can view this type of details
-            setError('Access denied. Only the requesting member can view provider details here.');
-            setLoading(false);
-            return;
-        }
-
-        setTimeout(() => {
-            const details = mockUserProfiles[providerId];
-            if (details && details.role === 'provider') {
-                setProviderDetails(details);
-            } else {
-                setError('Provider details not found.');
-            }
-            setLoading(false);
-        }, 300);
-    }, [providerId, userRole, mockUserProfiles]);
-
-    return (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">Provider Details</h3>
-                {loading ? (
-                    <p>Loading...</p>
-                ) : error ? (
-                    <p className="text-red-500">{error}</p>
-                ) : providerDetails ? (
-                    <div className="space-y-4">
-                        <p><span className="font-semibold">Company Name:</span> {providerDetails.companyName || 'N/A'}</p>
-                        <p><span className="font-semibold">Contact Person:</span> {providerDetails.name}</p>
-                        <p><span className="font-semibold">Email:</span> {providerDetails.email || 'N/A'}</p>
-                        <p><span className="font-semibold">Phone:</span> {providerDetails.phone || 'N/A'}</p>
-                        <p><span className="font-semibold">Specialties:</span> {providerDetails.specialties || 'N/A'}</p>
-                        <p><span className="font-semibold">Address:</span> {providerDetails.address || 'N/A'}</p>
-                        <p><span className="font-semibold">Bio:</span> {providerDetails.bio || 'N/A'}</p>
-                    </div>
-                ) : (
-                    <p>No details found.</p>
-                )}
-                <div className="flex justify-end mt-6">
-                    <button
-                        onClick={onClose}
-                        className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
-                    >
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-
-// MyQuotesPage (For Providers to manage their submitted quotes)
-const MyQuotesPage = () => {
-    const { userId, mockProblems, setMockProblems, setMessage } = useContext(AppContext);
-    const [myQuotes, setMyQuotes] = useState([]);
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [confirmAction, setConfirmAction] = useState(null);
-    const [confirmMessage, setConfirmMessage] = useState('');
-
-    useEffect(() => {
-        // Flatten all quotes from all problems that belong to the current provider
-        let providerQuotes = [];
-        mockProblems.forEach(problem => {
-            problem.quotes.forEach(quote => {
-                if (quote.providerId === userId) {
-                    providerQuotes.push({
-                        ...quote,
-                        problemId: problem.id,
-                        problemTitle: problem.title, // Add problem title for display
-                        problemStatus: problem.status // Add problem status for context
-                    });
-                }
-            });
-        });
-        setMyQuotes(providerQuotes.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
-    }, [mockProblems, userId]);
-
-    const handleWithdrawQuote = (quoteId, problemId) => {
-        setConfirmMessage("Are you sure you want to withdraw this quote?");
-        setConfirmAction(() => () => {
-            setMockProblems(prevProblems =>
-                prevProblems.map(problem => {
-                    if (problem.id === problemId) {
-                        return {
-                            ...problem,
-                            quotes: problem.quotes.filter(quote => quote.id !== quoteId)
-                        };
-                    }
-                    return problem;
-                })
-            );
-            setMessage({ type: 'success', text: 'Quote withdrawn successfully!' });
-            setShowConfirmModal(false);
-        });
-        setMessage({ type: '', text: '' }); // Clear existing message
-        setShowConfirmModal(true);
     };
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
-                <PackageIcon size={28} className="mr-3 text-[#964b00]" /> My Submitted Quotes
-            </h2>
-
-            {myQuotes.length === 0 ? (
-                <p className="text-gray-600">You haven't submitted any quotes yet. Browse the Problem List to find opportunities!</p>
-            ) : (
-                <div className="overflow-x-auto">
-                    <table className="min-w-full bg-white rounded-lg shadow-md">
-                        <thead>
-                            <tr className="bg-gray-200 text-gray-700 uppercase text-sm leading-normal">
-                                <th className="py-3 px-6 text-left">Problem Title</th>
-                                <th className="py-3 px-6 text-left">Amount</th>
-                                <th className="py-3 px-6 text-left">Details</th>
-                                <th className="py-3 px-6 text-left">Status</th>
-                                <th className="py-3 px-6 text-center">Problem Status</th> {/* Added for context */}
-                                <th className="py-3 px-6 text-center">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="text-gray-600 text-sm font-light">
-                            {myQuotes.map(quote => (
-                                <tr key={quote.id} className="border-b border-gray-200 hover:bg-gray-100">
-                                    <td className="py-3 px-6 text-left whitespace-nowrap">{quote.problemTitle || 'N/A'}</td>
-                                    <td className="py-3 px-6 text-left">R{quote.amount?.toFixed(2) || 'N/A'}</td>
-                                    <td className="py-3 px-6 text-left max-w-xs overflow-hidden text-ellipsis">{quote.details || 'N/A'}</td>
-                                    <td className="py-3 px-6 text-left">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                                            quote.status === 'accepted' ? 'bg-green-100 text-green-800' :
-                                            quote.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                            'bg-red-100 text-red-800'
-                                        }`}>
-                                            {quote.status}
-                                        </span>
-                                    </td>
-                                     <td className="py-3 px-6 text-center">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold capitalize ${
-                                            quote.problemStatus === 'open' ? 'bg-gray-100 text-gray-800' :
-                                            quote.problemStatus === 'closed' ? 'bg-blue-100 text-blue-800' :
-                                            'bg-purple-100 text-purple-800'
-                                        }`}>
-                                            {quote.problemStatus || 'N/A'}
-                                        </span>
-                                    </td>
-                                    <td className="py-3 px-6 text-center">
-                                        {quote.status === 'pending' && quote.problemStatus === 'open' && (
-                                            <button
-                                                onClick={() => handleWithdrawQuote(quote.id, quote.problemId)}
-                                                className="px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 text-xs"
-                                            >
-                                                Withdraw
-                                            </button>
-                                        )}
-                                        {quote.status === 'accepted' && (
-                                            <span className="text-green-600 text-sm font-bold">Accepted!</span>
-                                        )}
-                                        {quote.status === 'pending' && quote.problemStatus === 'closed' && (
-                                             <span className="text-gray-500 text-xs">Problem Closed</span>
-                                        )}
-                                        {quote.status === 'pending' && quote.problemStatus === 'resolved' && (
-                                             <span className="text-gray-500 text-xs">Problem Resolved</span>
-                                        )}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-            {showConfirmModal && (
-                <ConfirmationModal
-                    message={confirmMessage}
-                    onConfirm={confirmAction}
-                    onCancel={() => setShowConfirmModal(false)}
-                />
-            )}
-        </div>
-    );
-};
-
-// MyRequestsPage (For Members to manage their posted problems and received quotes)
-const MyRequestsPage = () => {
-    const { userId, mockProblems, setMockProblems, isPaidMember, setMessage } = useContext(AppContext);
-    const [myProblems, setMyProblems] = useState([]);
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [confirmAction, setConfirmAction] = useState(null);
-    const [confirmMessage, setConfirmMessage] = useState('');
-
-    useEffect(() => {
-        // Filter problems posted by the current user
-        const memberProblems = mockProblems.filter(problem => problem.requesterId === userId);
-        setMyProblems(memberProblems.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
-    }, [mockProblems, userId]);
-
-    const handleAcceptQuote = (problemId, quoteId, providerId) => {
-        setConfirmMessage("By accepting this quote, your contact information (name, email, phone) will be shared with the selected provider. Do you wish to proceed?");
-        setConfirmAction(() => () => {
-            setMockProblems(prevProblems =>
-                prevProblems.map(problem => {
-                    if (problem.id === problemId) {
-                        return {
-                            ...problem,
-                            status: 'closed',
-                            acceptedQuoteId: quoteId,
-                            quotes: problem.quotes.map(q =>
-                                q.id === quoteId ? { ...q, status: 'accepted' } : q
-                            )
-                        };
-                    }
-                    return problem;
-                })
-            );
-            setMessage({ type: 'success', text: 'Quote accepted and problem closed! Provider contact details now available.' });
-            setShowConfirmModal(false);
-        });
-        setMessage({ type: '', text: '' }); // Clear existing message
-        setShowConfirmModal(true);
-    };
-
-    const handleMarkProblemResolved = (problemId) => {
-        setConfirmMessage("Are you sure you want to mark this problem as resolved? This cannot be undone.");
-        setConfirmAction(() => () => {
-            setMockProblems(prevProblems =>
-                prevProblems.map(problem =>
-                    problem.id === problemId ? { ...problem, status: 'resolved' } : problem
-                )
-            );
-            setMessage({ type: 'success', text: 'Problem marked as resolved!' });
-            setShowConfirmModal(false);
-        });
-        setMessage({ type: '', text: '' }); // Clear existing message
-        setShowConfirmModal(true);
-    };
-
-    const handleDeleteProblem = (problemId) => {
-        setConfirmMessage("Are you sure you want to delete this problem and all associated quotes? This action is irreversible.");
-        setConfirmAction(() => () => {
-            setMockProblems(prevProblems => prevProblems.filter(problem => problem.id !== problemId));
-            setMessage({ type: 'success', text: 'Problem and all associated quotes deleted successfully!' });
-            setShowConfirmModal(false);
-        });
-        setMessage({ type: '', text: '' }); // Clear existing message
-        setShowConfirmModal(true);
-    };
-
-
-    if (!isPaidMember) {
-        return (
-            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12">
-                <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
-                <p className="text-gray-700 mb-6">
-                    You must be a **paid member** to view and manage quotes for your problems.
-                    Free members can post problems (limit 5) but require a paid membership for full interaction.
-                </p>
-                <button
-                    onClick={() => alert('Feature to upgrade membership is not implemented in this demo.')} // Placeholder
-                    className="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200"
-                >
-                    Upgrade Membership
-                </button>
-            </div>
-        );
-    }
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
-                <FileTextIcon size={28} className="mr-3 text-[#964b00]" /> My Posted Problems & Quotes
-            </h2>
-
-            {myProblems.length === 0 ? (
-                <p className="text-gray-600">You haven't posted any problems yet. Click "Post New Problem" on the Problem List page!</p>
-            ) : (
-                <div className="space-y-6">
-                    {myProblems.map(problem => (
-                        <div key={problem.id} className="border border-gray-200 rounded-lg p-4 shadow-sm bg-gray-50">
-                            <div className="flex justify-between items-center mb-3">
-                                <h3 className="text-xl font-bold text-gray-800">{problem.title}</h3>
-                                <span className={`px-3 py-1 rounded-full text-sm font-semibold capitalize ${
-                                    problem.status === 'open' ? 'bg-yellow-100 text-yellow-800' :
-                                    problem.status === 'closed' ? 'bg-blue-100 text-blue-800' :
-                                    'bg-green-100 text-green-800'
-                                }`}>
-                                    {problem.status}
-                                </span>
-                            </div>
-                            <p className="text-gray-700 mb-2">{problem.description}</p>
-                            <p className="text-gray-600 text-sm">Category: {problem.category}</p>
-                            <p className="text-gray-500 text-xs mt-1">Posted: {problem.createdAt?.toLocaleString()}</p>
-                            {!problem.isApproved && (
-                                <span className="px-2 py-1 text-xs font-semibold bg-red-100 text-red-800 rounded-full mt-2 inline-block">Awaiting Admin Approval</span>
-                            )}
-
-                            <div className="mt-4 flex space-x-3">
-                                <button
-                                    onClick={() => { /* In a real app, this would navigate to problem-detail page */ alert('Navigating to problem details for: ' + problem.title); }}
-                                    className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 text-sm flex items-center"
-                                >
-                                    <PackageIcon size={18} className="mr-2" /> View Quotes ({problem.quotes?.length || 0})
-                                </button>
-                                {problem.status === 'open' && (
-                                    <button
-                                        onClick={() => handleDeleteProblem(problem.id)}
-                                        className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 text-sm flex items-center"
-                                    >
-                                        <XCircleIcon size={18} className="mr-2" /> Delete Problem
-                                    </button>
-                                )}
-                                {(problem.status === 'closed' && problem.acceptedQuoteId) && (
-                                    <button
-                                        onClick={() => handleMarkProblemResolved(problem.id)}
-                                        className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200 text-sm flex items-center"
-                                    >
-                                        <CheckCircleIcon size={18} className="mr-2" /> Mark as Resolved
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-             {showConfirmModal && (
-                <ConfirmationModal
-                    message={confirmMessage}
-                    onConfirm={confirmAction}
-                    onCancel={() => setShowConfirmModal(false)}
-                />
-            )}
-        </div>
-    );
-};
-
-
-// AdminToolsPage
-const AdminToolsPage = ({ onNavigate }) => { // onNavigate prop added
-    const { userRole, mockProblems, setMockProblems, mockUserProfiles, setMockUserProfiles, setMessage } = useContext(AppContext);
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [confirmAction, setConfirmAction] = useState(null);
-    const [confirmMessage, setConfirmMessage] = useState('');
-
-    if (userRole !== 'admin') {
-        return (
-            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12">
-                <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
-                <p className="text-gray-700 mb-6">You must be an **admin** to access this page.</p>
-            </div>
-        );
-    }
-
-    const handleApproveProblem = (problemId) => {
-        setMockProblems(prevProblems =>
-            prevProblems.map(problem =>
-                problem.id === problemId ? { ...problem, isApproved: true } : problem
-            )
-        );
-        setMessage({ type: 'success', text: `Problem ${problemId} approved.` });
-    };
-
-    const handleDeleteProblem = (problemId) => {
-        setConfirmMessage("Are you sure you want to delete this problem and all its quotes? This is permanent.");
-        setConfirmAction(() => () => {
-            setMockProblems(prevProblems => prevProblems.filter(problem => problem.id !== problemId));
-            setMessage({ type: 'success', text: `Problem ${problemId} deleted.` });
-            setShowConfirmModal(false);
-        });
-        setShowConfirmModal(true);
-    };
-
-    const handleApproveProvider = (providerId) => {
-        setMockUserProfiles(prevProfiles => ({
-            ...prevProfiles,
-            [providerId]: { ...prevProfiles[providerId], isProviderApproved: true }
-        }));
-        setMessage({ type: 'success', text: `Provider ${mockUserProfiles[providerId]?.name} approved.` });
-    };
-
-    const handleDeleteProvider = (providerId) => {
-        setConfirmMessage("Are you sure you want to delete this provider? This will remove their profile.");
-        setConfirmAction(() => () => {
-            setMockUserProfiles(prevProfiles => {
-                const newProfiles = { ...prevProfiles };
-                delete newProfiles[providerId];
-                return newProfiles;
-            });
-            setMessage({ type: 'success', text: `Provider ${providerId} deleted.` });
-            setShowConfirmModal(false);
-        });
-        setShowConfirmModal(true);
-    };
-
-    const problemsAwaitingApproval = mockProblems.filter(p => !p.isApproved);
-    const pendingProviderApprovals = Object.values(mockUserProfiles).filter(p => p.role === 'provider' && !p.isProviderApproved);
-    const allProviders = Object.values(mockUserProfiles).filter(p => p.role === 'provider');
-
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
-                <ShieldCheckIcon size={28} className="mr-3 text-[#964b00]" /> Admin Tools
-            </h2>
-
-            <div className="space-y-8">
-                {/* Admin Quick Actions */}
-                <div className="border border-gray-200 rounded-lg p-4">
-                    <h3 className="text-xl font-bold text-gray-700 mb-4">Admin Quick Links</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <button
-                            onClick={() => onNavigate('admin-pricing')}
-                            className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 flex items-center justify-center"
-                        >
-                            <DollarSignIcon size={20} className="mr-2" /> Manage Pricing Plans
-                        </button>
-                        <button
-                            onClick={() => onNavigate('admin-branding')} // New button for branding
-                            className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 flex items-center justify-center"
-                        >
-                            <PaintbrushIcon size={20} className="mr-2" /> Manage Branding
-                        </button>
-                    </div>
-                </div>
-
-                {/* Problem Management */}
-                <div className="border border-gray-200 rounded-lg p-4">
-                    <h3 className="text-xl font-bold text-gray-700 mb-4">Problem Management</h3>
-                    <h4 className="text-lg font-semibold text-gray-600 mb-3">Problems Awaiting Approval ({problemsAwaitingApproval.length})</h4>
-                    {problemsAwaitingApproval.length === 0 ? (
-                        <p className="text-gray-500">No problems awaiting approval.</p>
-                    ) : (
-                        <ul className="divide-y divide-gray-200">
-                            {problemsAwaitingApproval.map(problem => (
-                                <li key={problem.id} className="py-2 flex justify-between items-center">
-                                    <span>{problem.title} (by {mockUserProfiles[problem.requesterId]?.name || 'Unknown'})</span>
-                                    <div>
-                                        <button
-                                            onClick={() => handleApproveProblem(problem.id)}
-                                            className="ml-3 px-3 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 text-sm"
-                                        >
-                                            Approve
-                                        </button>
-                                        <button
-                                            onClick={() => handleDeleteProblem(problem.id)}
-                                            className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm"
-                                        >
-                                            Delete
-                                        </button>
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-
-                     <h4 className="text-lg font-semibold text-gray-600 mt-6 mb-3">All Problems ({mockProblems.length})</h4>
-                     <ul className="divide-y divide-gray-200">
-                        {mockProblems.map(problem => (
-                            <li key={problem.id} className="py-2 flex justify-between items-center">
-                                <span>{problem.title} ({problem.status} - {problem.isApproved ? 'Approved' : 'Pending'})</span>
-                                <button
-                                    onClick={() => handleDeleteProblem(problem.id)}
-                                    className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm"
-                                >
-                                    Delete
-                                </button>
-                            </li>
-                        ))}
-                     </ul>
-                </div>
-
-                {/* Provider Management */}
-                <div className="border border-gray-200 rounded-lg p-4">
-                    <h3 className="text-xl font-bold text-gray-700 mb-4">Provider Management</h3>
-                    <h4 className="text-lg font-semibold text-gray-600 mb-3">Providers Awaiting Approval ({pendingProviderApprovals.length})</h4>
-                    {pendingProviderApprovals.length === 0 ? (
-                        <p className="text-gray-500">No providers awaiting approval.</p>
-                    ) : (
-                        <ul className="divide-y divide-gray-200">
-                            {pendingProviderApprovals.map(provider => (
-                                <li key={provider.uid} className="py-2 flex justify-between items-center">
-                                    <span>{provider.name} ({provider.companyName || 'N/A'})</span>
-                                    <div>
-                                        <button
-                                            onClick={() => handleApproveProvider(provider.uid)}
-                                            className="ml-3 px-3 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 text-sm"
-                                        >
-                                            Approve
-                                        </button>
-                                        <button
-                                            onClick={() => handleDeleteProvider(provider.uid)}
-                                            className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm"
-                                        >
-                                            Delete
-                                        </button>
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                    <h4 className="text-lg font-semibold text-gray-600 mt-6 mb-3">All Providers ({allProviders.length})</h4>
-                     <ul className="divide-y divide-gray-200">
-                        {allProviders.map(provider => (
-                            <li key={provider.uid} className="py-2 flex justify-between items-center">
-                                <span>{provider.name} ({provider.isProviderApproved ? 'Approved' : 'Pending'})</span>
-                                <button
-                                    onClick={() => handleDeleteProvider(provider.uid)}
-                                    className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm"
-                                >
-                                    Delete
-                                </button>
-                            </li>
-                        ))}
-                     </ul>
-                </div>
-            </div>
-            {showConfirmModal && (
-                <ConfirmationModal
-                    message={confirmMessage}
-                    onConfirm={confirmAction}
-                    onCancel={() => setShowConfirmModal(false)}
-                />
-            )}
-        </div>
-    );
-};
-
-// AdminPricingPage component
-const AdminPricingPage = () => {
-    const { userRole, mockPricingPlans, setMockPricingPlans, setMessage } = useContext(AppContext);
-    const [showEditPlanModal, setShowEditPlanModal] = useState(false);
-    const [currentEditingPlan, setCurrentEditingPlan] = useState(null); // null for new, object for edit
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [confirmAction, setConfirmAction] = useState(null);
-    const [confirmMessage, setConfirmMessage] = useState('');
-
-    if (userRole !== 'admin') {
-        return (
-            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12">
-                <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
-                <p className="text-gray-700 mb-6">You must be an **admin** to access this page.</p>
-            </div>
-        );
-    }
-
-    const handleAddPlan = () => {
-        setCurrentEditingPlan(null); // Indicate new plan
-        setShowEditPlanModal(true);
-    };
-
-    const handleEditPlan = (plan) => {
-        setCurrentEditingPlan(plan);
-        setShowEditPlanModal(true);
-    };
-
-    const handleSavePlan = (updatedPlan) => {
-        if (updatedPlan.id) {
-            // Edit existing plan
-            setMockPricingPlans(prevPlans =>
-                prevPlans.map(p => (p.id === updatedPlan.id ? updatedPlan : p))
-            );
-            setMessage({ type: 'success', text: `Plan "${updatedPlan.name}" updated successfully!` });
-        } else {
-            // Add new plan
-            const newPlan = { ...updatedPlan, id: crypto.randomUUID() };
-            setMockPricingPlans(prevPlans => [...prevPlans, newPlan]);
-            setMessage({ type: 'success', text: `New plan "${newPlan.name}" added successfully!` });
-        }
-        setShowEditPlanModal(false);
-    };
-
-    const handleDeletePlan = (planId, planName) => {
-        setConfirmMessage(`Are you sure you want to delete the plan "${planName}"? This action cannot be undone.`);
-        setConfirmAction(() => () => {
-            setMockPricingPlans(prevPlans => prevPlans.filter(p => p.id !== planId));
-            setMessage({ type: 'success', text: `Plan "${planName}" deleted successfully!` });
-            setShowConfirmModal(false);
-        });
-        setShowConfirmModal(true);
-    };
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center justify-between">
-                <DollarSignIcon size={28} className="mr-3 text-[#964b00]" /> Manage Pricing Plans
-                <button
-                    onClick={handleAddPlan}
-                    className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 flex items-center"
-                >
-                    <PlusCircleIcon size={18} className="mr-2" /> Add New Plan
-                </button>
-            </h2>
-
-            {mockPricingPlans.length === 0 ? (
-                <p className="text-gray-600">No pricing plans defined. Add one to get started!</p>
-            ) : (
-                <div className="overflow-x-auto">
-                    <table className="min-w-full bg-white rounded-lg shadow-md">
-                        <thead>
-                            <tr className="bg-gray-200 text-gray-700 uppercase text-sm leading-normal">
-                                <th className="py-3 px-6 text-left">Plan Name</th>
-                                <th className="py-3 px-6 text-left">Price</th>
-                                <th className="py-3 px-6 text-left">Interval</th>
-                                <th className="py-3 px-6 text-left">Plan Code</th>
-                                <th className="py-3 px-6 text-left">Features</th>
-                                <th className="py-3 px-6 text-center">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="text-gray-600 text-sm font-light">
-                            {mockPricingPlans.map(plan => (
-                                <tr key={plan.id} className="border-b border-gray-200 hover:bg-gray-100">
-                                    <td className="py-3 px-6 text-left font-semibold">{plan.name}</td>
-                                    <td className="py-3 px-6 text-left">{plan.price}</td>
-                                    <td className="py-3 px-6 text-left capitalize">{plan.interval}</td>
-                                    <td className="py-3 px-6 text-left font-mono text-xs">{plan.planCode || 'N/A'}</td>
-                                    <td className="py-3 px-6 text-left">
-                                        <ul className="list-disc list-inside">
-                                            {plan.features.map((feature, idx) => (
-                                                <li key={idx} className="whitespace-nowrap overflow-hidden text-ellipsis">{feature}</li>
-                                            ))}
-                                        </ul>
-                                    </td>
-                                    <td className="py-3 px-6 text-center whitespace-nowrap">
-                                        <button
-                                            onClick={() => handleEditPlan(plan)}
-                                            className="px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 text-xs mr-2"
-                                        >
-                                            Edit
-                                        </button>
-                                        <button
-                                            onClick={() => handleDeletePlan(plan.id, plan.name)}
-                                            className="px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 text-xs"
-                                        >
-                                            Delete
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-
-            {showEditPlanModal && (
-                <EditPricingPlanModal
-                    plan={currentEditingPlan}
-                    onClose={() => setShowEditPlanModal(false)}
-                    onSave={handleSavePlan}
-                />
-            )}
-             {showConfirmModal && (
-                <ConfirmationModal
-                    message={confirmMessage}
-                    onConfirm={confirmAction}
-                    onCancel={() => setShowConfirmModal(false)}
-                />
-            )}
-        </div>
-    );
-};
-
-// EditPricingPlanModal component
-const EditPricingPlanModal = ({ plan, onClose, onSave }) => {
-    const [formData, setFormData] = useState({
-        id: plan?.id || null,
-        name: plan?.name || '',
-        price: plan?.price?.replace('R', '').replace('/month', '') || '', // Extract numerical part
-        rawPrice: plan?.rawPrice || '',
-        interval: plan?.interval || 'monthly',
-        planCode: plan?.planCode || '',
-        features: plan?.features?.join('\n') || '', // Convert array to newline separated string
-    });
-    const [formError, setFormError] = useState('');
-
-    useEffect(() => {
-        if (plan) {
-            setFormData({
-                id: plan.id,
-                name: plan.name,
-                price: plan.price.replace('R', '').replace('/month', ''),
-                rawPrice: plan.rawPrice,
-                interval: plan.interval,
-                planCode: plan.planCode,
-                features: plan.features.join('\n'),
-            });
-        }
-    }, [plan]);
-
-    const handleChange = (e) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        setFormError('');
-
-        const { name, price, interval, planCode, features } = formData;
-
-        if (!name || !price || !interval || !planCode || !features) {
-            setFormError('All fields are required.');
-            return;
-        }
-        const parsedPrice = parseFloat(price);
-        if (isNaN(parsedPrice) || parsedPrice <= 0) {
-            setFormError('Price must be a positive number.');
-            return;
-        }
-
-        const updatedPlan = {
-            id: formData.id,
-            name,
-            price: `R${parsedPrice.toFixed(0)}/${interval}`, // Reformat price string
-            rawPrice: parsedPrice,
-            interval,
-            planCode,
-            features: features.split('\n').map(f => f.trim()).filter(f => f), // Convert back to array
-        };
-
-        onSave(updatedPlan);
-        onClose();
-    };
-
-    return (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">{plan ? 'Edit Pricing Plan' : 'Add New Pricing Plan'}</h3>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planName">
-                            Plan Name
-                        </label>
-                        <input
-                            type="text"
-                            id="planName"
-                            name="name"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={formData.name}
-                            onChange={handleChange}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planPrice">
-                            Price (e.g., 50, 150)
-                        </label>
-                        <input
-                            type="number"
-                            id="planPrice"
-                            name="price"
-                            step="1"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={formData.price}
-                            onChange={handleChange}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planInterval">
-                            Interval
-                        </label>
-                        <select
-                            id="planInterval"
-                            name="interval"
-                            className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={formData.interval}
-                            onChange={handleChange}
-                            required
-                        >
-                            <option value="monthly">Monthly</option>
-                            <option value="yearly">Yearly</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planCode">
-                            Paystack Plan Code
-                        </label>
-                        <input
-                            type="text"
-                            id="planCode"
-                            name="planCode"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={formData.planCode}
-                            onChange={handleChange}
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planFeatures">
-                            Features (one per line)
-                        </label>
-                        <textarea
-                            id="planFeatures"
-                            name="features"
-                            rows="5"
-                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            value={formData.features}
-                            onChange={handleChange}
-                            required
-                        ></textarea>
-                    </div>
-
-                    {formError && (
-                        <p className="text-red-500 text-sm">{formError}</p>
-                    )}
-
-                    <div className="flex justify-end space-x-4 mt-6">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
-                        >
-                            {plan ? 'Save Changes' : 'Add Plan'}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
-
-
-// SettingsPage
-const SettingsPage = () => {
-    const { userId, userRole, isPaidMember } = useContext(AppContext);
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
-                <SettingsIcon size={28} className="mr-3 text-[#964b00]" /> Settings
-            </h2>
+            <h2 className="text-2xl font-semibold text-gray-800 mb-4">Branding Settings</h2>
             <div className="space-y-4">
-                <div className="p-4 bg-gray-50 rounded-md border border-gray-200">
-                    <h3 className="text-xl font-semibold text-gray-700 mb-2">Account Information</h3>
-                    <p className="text-gray-600">Your unique User ID: <span className="font-mono bg-gray-200 px-2 py-1 rounded-sm text-sm">{userId || 'N/A'}</span></p>
-                    <p className="text-gray-600">Your Role: <span className="font-semibold capitalize">{userRole}</span></p>
-                    {userRole === 'member' && (
-                        <p className="text-gray-600">Membership Status: <span className={`font-semibold ${isPaidMember ? 'text-blue-600' : 'text-yellow-600'}`}>{isPaidMember ? 'Paid' : 'Free'}</span></p>
+                <div>
+                    <label htmlFor="appName" className="block text-gray-700 text-sm font-bold mb-2">App Name:</label>
+                    <input
+                        type="text"
+                        id="appName"
+                        value={newAppName}
+                        onChange={(e) => setNewAppName(e.target.value)}
+                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    />
+                </div>
+                <div>
+                    <label htmlFor="appLogo" className="block text-gray-700 text-sm font-bold mb-2">App Logo URL:</label>
+                    <input
+                        type="url"
+                        id="appLogo"
+                        value={newAppLogo}
+                        onChange={(e) => setNewAppLogo(e.target.value)}
+                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    />
+                    {newAppLogo && (
+                        <div className="mt-2">
+                            <p className="text-sm text-gray-600">Logo Preview:</p>
+                            <img
+                                src={newAppLogo}
+                                alt="App Logo Preview"
+                                className="w-24 h-auto rounded-md mt-1"
+                                onError={(e) => { e.target.onerror = null; e.target.src="https://placehold.co/100x40/964b00/ffffff?text=Logo"; }}
+                            />
+                        </div>
                     )}
-                    <p className="text-gray-600 mt-2">Manage your public profile visibility and contact information from the Profile page.</p>
                 </div>
-                {/* Additional settings can be added here */}
-                <div className="p-4 bg-gray-50 rounded-md border border-gray-200">
-                    <h3 className="text-xl font-semibold text-gray-700 mb-2">Notification Preferences</h3>
-                    <p className="text-gray-600">Configure how you receive alerts for new activity.</p>
-                    <div className="mt-3 flex items-center">
-                        <input type="checkbox" id="email-notifications" className="mr-2" defaultChecked />
-                        <label htmlFor="email-notifications" className="text-gray-700">Email notifications</label>
-                    </div>
-                    <div className="mt-2 flex items-center">
-                        <input type="checkbox" id="sms-notifications" className="mr-2" />
-                        <label htmlFor="sms-notifications" className="text-gray-700">SMS notifications (coming soon)</label>
-                    </div>
-                </div>
-
-                <div className="p-4 bg-gray-50 rounded-md border border-gray-200">
-                    <h3 className="text-xl font-semibold text-gray-700 mb-2">Data Management</h3>
-                    <p className="text-gray-600">Review and manage your data.</p>
-                    <button className="mt-3 px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 transition-colors duration-200">
-                        Export My Data
-                    </button>
+                <div className="flex justify-end mt-6">
+                    {canAccess('admin') && ( // Only admins can save branding
+                        <button
+                            onClick={handleSaveBranding}
+                            className="px-6 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200"
+                        >
+                            Save Branding
+                        </button>
+                    )}
                 </div>
             </div>
         </div>
     );
 };
-
-export default App;

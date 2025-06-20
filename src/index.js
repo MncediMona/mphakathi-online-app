@@ -1,54 +1,58 @@
-// src/index.js in your React application
+// src/index.js
 
-import React from 'react';
-import ReactDOM from 'react-dom/client'; // For React 18+
-import './index.css'; // Assuming you have a CSS file for global styles
-import App from './App'; // Your main App component
+import React from "react";
+import { createRoot } from "react-dom/client";
+import "./index.css"; // Assuming you have a CSS file for global styles
+import App from "./App"; // Your main App component
+import * as serviceWorker from "./serviceWorker"; // For offline capabilities, if desired
+import { Auth0Provider } from "@auth0/auth0-react"; // Import the Auth0Provider
+import history from "./utils/history"; // Import the custom history object
+import { getConfig } from "./config"; // Import the function to get Auth0 configuration
 
-// Firebase Imports for React - these are essential for React integration
-import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
-// If you use other Firebase services like Firestore, also import them:
-// import { getFirestore } from 'firebase/firestore';
-
-// Your Firebase project configuration
-// IMPORTANT: Replace the placeholder values ("YOUR_API_KEY", etc.)
-// with the actual configuration details from your Firebase project settings.
-const firebaseConfig = {
-  apiKey: "AIzaSyAowOlYGrWCtzqpq-aysb_WkEnyims_M7k",
-  authDomain: "mphakathionline.firebaseapp.com",
-  databaseURL: "https://mphakathionline-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "mphakathionline",
-  storageBucket: "mphakathionline.firebasestorage.app",
-  messagingSenderId: "139852645000",
-  appId: "1:139852645000:web:8db2bba11935859b14553d",
-  measurementId: "G-4Z2XPPNWLR"
+/**
+ * This function is called after Auth0 authenticates the user and redirects them back to your app.
+ * It's responsible for redirecting the user back to the page they were trying to access,
+ * or to the main application path if no specific return path is provided.
+ * @param {object} appState - Contains state passed during the login redirect (e.g., returnTo URL).
+ */
+const onRedirectCallback = (appState) => {
+  history.push(
+    appState && appState.returnTo
+      ? appState.returnTo
+      : window.location.pathname
+  );
 };
 
-// Initialize Firebase App
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app); // Get the Auth service instance from the initialized app
+// Get the Auth0 configuration details from your config.js file.
+// This function reads from auth_config.json indirectly.
+const config = getConfig();
 
-// Listen for authentication state changes
-// This will tell you if a user logs in or out
-onAuthStateChanged(auth, (user) => {
-  if (user) {
-    // User is signed in (e.g., after login or if session persists)
-    console.log("User is logged in:", user.email, "UID:", user.uid);
-    // You can now access the logged-in user's data (e.g., user.uid, user.email)
-    // and update your React application's state or navigate accordingly.
-  } else {
-    // User is signed out (e.g., after logout or if no active session)
-    console.log("No user is logged in.");
-    // You might want to redirect to a login page or update UI for a logged-out state.
-  }
-});
+// Define the configuration for the Auth0Provider.
+const providerConfig = {
+  domain: config.domain,
+  clientId: config.clientId,
+  onRedirectCallback, // The callback function for post-login redirection
+  authorizationParams: {
+    redirect_uri: window.location.origin, // The URL Auth0 should redirect back to after authentication
+    // Optionally include audience if you are also calling a secured API
+    ...(config.audience ? { audience: config.audience } : null),
+  },
+};
 
-// This is where your React application is rendered into the HTML document
-const root = ReactDOM.createRoot(document.getElementById('root'));
+// Get the root element where your React application will be mounted.
+const root = createRoot(document.getElementById('root'));
+
+// Render your React application wrapped with the Auth0Provider.
+// This makes Auth0 authentication state and methods available throughout your App component tree.
 root.render(
-  <React.StrictMode>
-    {/* Your main React component (App) will use Firebase services */}
-    <App />
-  </React.StrictMode>
+  <Auth0Provider
+    {...providerConfig} // Spread the provider configuration props here
+  >
+    <App /> {/* Your main application component */}
+  </Auth0Provider>,
 );
+
+// If you want your app to work offline and load faster, you can change
+// unregister() to register() below. Note this comes with some pitfalls.
+// Learn more about service workers: https://bit.ly/CRA-PWA
+serviceWorker.unregister();
