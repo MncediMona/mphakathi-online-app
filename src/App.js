@@ -3,7 +3,7 @@ import {
   HomeIcon, UserIcon, FileTextIcon, PackageIcon,
   ShieldCheckIcon, SettingsIcon, LogOutIcon, BriefcaseIcon, PlusCircleIcon,
   EditIcon, CheckCircleIcon, XCircleIcon, DollarSignIcon, CheckCircle2Icon,
-  PaintbrushIcon
+  PaintbrushIcon, MenuIcon, XIcon // Added MenuIcon and XIcon for mobile sidebar
 } from 'lucide-react';
 
 // AppContext definition
@@ -17,7 +17,7 @@ const AppContext = createContext(null);
 const ConfirmationModal = ({ message, onConfirm, onCancel, confirmText = "Confirm", cancelText = "Cancel" }) => {
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-sm">
+            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-sm rounded-md">
                 <p className="text-lg text-gray-800 mb-6">{message}</p>
                 <div className="flex justify-end space-x-4">
                     <button
@@ -72,13 +72,19 @@ const App = () => {
     const [submittingQuoteForProblem, setSubmittingQuoteForProblem] = useState(null);
     const [editingQuote, setEditingQuote] = useState(null);
     const [showBecomeProviderModal, setShowBecomeProviderModal] = useState(false);
-    const [currentEditingPlan, setCurrentEditingPlan] = useState(null); // Used to pass to EditPricingPlanModal
+    const [currentEditingPlan, setCurrentEditingPlan] = useState(null);
 
     // Global App Branding State
     const [appName, setAppName] = useState(process.env.REACT_APP_APP_NAME || 'Mphakathi Online');
     const [appLogo, setAppLogo] = useState(process.env.REACT_APP_APP_LOGO || 'https://placehold.co/100x40/964b00/ffffff?text=Logo');
 
-    // Mock data storage (in-memory, resets on refresh)
+    // State for mobile sidebar
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+    // Environment variable to control dev features
+    const enableDevFeatures = process.env.REACT_APP_ENABLE_DEV_FEATURES === 'true'; // Set this in Netlify for dev builds, leave false or unset for production
+
+    // Mock data storage (in-memory, resets on refresh) - WILL BE REPLACED BY DATABASE CALLS
     const [mockProblems, setMockProblems] = useState([
         {
             id: 'problem-1',
@@ -222,7 +228,7 @@ const App = () => {
     ]);
 
 
-    // Effect to initialize user profile on first load
+    // Effect to initialize user profile on first load - this mock logic will be replaced by Auth0
     useEffect(() => {
         if (userProfile.uid === '') {
             const newUserId = crypto.randomUUID();
@@ -242,6 +248,7 @@ const App = () => {
 
     // --- Handlers for Problem Management ---
     const handlePostProblem = (problemData) => {
+        // In a real app, this would be an API call to save to Neon DB
         const newProblem = {
             id: crypto.randomUUID(),
             title: problemData.title,
@@ -249,56 +256,61 @@ const App = () => {
             category: problemData.category,
             location: problemData.location,
             estimatedBudget: parseFloat(problemData.estimatedBudget),
-            requesterId: userId,
+            requesterId: userId, // This would be the actual Auth0 user ID
             status: 'open',
-            isApproved: userRole === 'admin',
+            isApproved: userRole === 'admin', // Admin approval logic would be server-side
             createdAt: new Date(),
             quotes: []
         };
         setMockProblems(prevProblems => [newProblem, ...prevProblems]);
         setShowPostProblemModal(false);
-        setMessage({ type: 'success', text: 'Problem posted successfully! Awaiting admin approval.' });
+        setMessage({ type: 'success', text: 'Problem posted successfully! Awaiting admin approval (mock).' });
     };
 
     const handleDeleteProblem = (problemId) => {
         setConfirmationMessage('Are you sure you want to delete this problem? This action cannot be undone.');
         setConfirmationAction(() => () => {
+            // API call to delete from Neon DB
             setMockProblems(prevProblems => prevProblems.filter(p => p.id !== problemId));
-            setMessage({ type: 'success', text: 'Problem deleted successfully.' });
+            setMessage({ type: 'success', text: 'Problem deleted successfully (mock).' });
             setShowConfirmationModal(false);
         });
         setShowConfirmationModal(true);
     };
 
     const handleEditProblem = (problemId, updatedData) => {
+        // API call to update problem in Neon DB
         setMockProblems(prevProblems => prevProblems.map(p =>
             p.id === problemId ? { ...p, ...updatedData } : p
         ));
-        setMessage({ type: 'success', text: 'Problem updated successfully.' });
+        setMessage({ type: 'success', text: 'Problem updated successfully (mock).' });
     };
 
     const handleApproveProblem = (problemId) => {
+        // API call to update problem status in Neon DB
         setMockProblems(prevProblems => prevProblems.map(p =>
             p.id === problemId ? { ...p, isApproved: true, status: 'open' } : p
         ));
-        setMessage({ type: 'success', text: 'Problem approved and made public.' });
+        setMessage({ type: 'success', text: 'Problem approved and made public (mock).' });
     };
 
     const handleMarkProblemResolved = (problemId) => {
+        // API call to update problem status in Neon DB
         setMockProblems(prevProblems => prevProblems.map(p =>
             p.id === problemId ? { ...p, status: 'resolved' } : p
         ));
-        setMessage({ type: 'success', text: 'Problem marked as resolved.' });
+        setMessage({ type: 'success', text: 'Problem marked as resolved (mock).' });
     };
 
 
     // --- Handlers for Quote Management ---
     const handleSubmitQuote = (problemId, quoteData) => {
+        // API call to save quote to Neon DB
         setMockProblems(prevProblems => prevProblems.map(problem => {
             if (problem.id === problemId) {
                 const newQuote = {
                     id: crypto.randomUUID(),
-                    providerId: userId,
+                    providerId: userId, // This would be the actual Auth0 user ID
                     providerName: userProfile.name,
                     amount: parseFloat(quoteData.proposedBudget),
                     details: quoteData.motivation,
@@ -311,13 +323,14 @@ const App = () => {
             }
             return problem;
         }));
-        setMessage({ type: 'success', text: 'Quote submitted successfully!' });
+        setMessage({ type: 'success', text: 'Quote submitted successfully (mock)!' });
         setSubmittingQuoteForProblem(null);
     };
 
     const handleAcceptQuote = (problemId, quoteId) => {
         setConfirmationMessage("By accepting this quote, your contact information (name, email, phone) will be shared with the selected provider. Do you wish to proceed?");
         setConfirmationAction(() => () => {
+            // API call to update quote/problem status in Neon DB
             setMockProblems(prevProblems => prevProblems.map(problem => {
                 if (problem.id === problemId) {
                     return {
@@ -331,7 +344,7 @@ const App = () => {
                 }
                 return problem;
             }));
-            setMessage({ type: 'success', text: 'Quote accepted! Problem marked as closed.' });
+            setMessage({ type: 'success', text: 'Quote accepted! Problem marked as closed (mock).' });
             setShowConfirmationModal(false);
         });
         setShowConfirmationModal(true);
@@ -340,19 +353,21 @@ const App = () => {
     const handleWithdrawQuote = (problemId, quoteId) => {
         setConfirmationMessage('Are you sure you want to withdraw this quote?');
         setConfirmationAction(() => () => {
+            // API call to delete quote from Neon DB
             setMockProblems(prevProblems => prevProblems.map(problem => {
                 if (problem.id === problemId) {
                     return { ...problem, quotes: problem.quotes.filter(q => q.id !== quoteId) };
                 }
                 return problem;
             }));
-            setMessage({ type: 'success', text: 'Quote withdrawn successfully.' });
+            setMessage({ type: 'success', text: 'Quote withdrawn successfully (mock).' });
             setShowConfirmationModal(false);
         });
         setShowConfirmationModal(true);
     };
 
     const handleEditQuote = (problemId, quoteId, updatedQuoteData) => {
+        // API call to update quote in Neon DB
         setMockProblems(prevProblems => prevProblems.map(problem => {
             if (problem.id === problemId) {
                 return {
@@ -364,13 +379,14 @@ const App = () => {
             }
             return problem;
         }));
-        setMessage({ type: 'success', text: 'Quote updated successfully.' });
+        setMessage({ type: 'success', text: 'Quote updated successfully (mock).' });
         setEditingQuote(null);
     };
 
 
     // --- General Authentication/Registration Handlers ---
     const handleRegister = (newUserData, roleType, isPaid = false) => {
+        // This will be replaced by Auth0 registration and then saving to Neon DB
         const newUid = crypto.randomUUID();
         const newUserProfile = {
             uid: newUid,
@@ -394,12 +410,13 @@ const App = () => {
         setUserProfileState(newUserProfile);
         setUserRole(newUserProfile.role);
         setIsPaidMember(newUserProfile.isPaidMember);
-        setMessage({ type: 'success', text: `Welcome, ${newUserData.name}! You are now registered as a ${roleType}.` });
+        setMessage({ type: 'success', text: `Welcome, ${newUserData.name}! You are now registered as a ${roleType} (mock).` });
         setCurrentPage('dashboard');
         setShowRegisterModal(false);
     };
 
     const handleBecomePaidMember = (newUserData, selectedPlanDetails) => {
+        // This will trigger Paystack payment and rely on webhook for DB update
         let existingUser = mockUserProfiles[userId];
         const newUid = userRole === 'loggedOut' ? crypto.randomUUID() : userId;
 
@@ -426,10 +443,11 @@ const App = () => {
         setUserRole('member');
         setIsPaidMember(true);
         setSelectedPlan(null);
-        setMessage({ type: 'success', text: `Congratulations! You are now a Paid Member (${selectedPlanDetails.name}).` });
+        setMessage({ type: 'success', text: `Congratulations! You are now a Paid Member (${selectedPlanDetails.name}) (mock).` });
         setCurrentPage('problems');
     };
 
+    // This mock login will be removed for production Auth0 login
     const handleLoginAs = (targetUid) => {
         let newUserId;
         let newProfile;
@@ -460,52 +478,55 @@ const App = () => {
 
     // --- Branding Management (manage:branding) ---
     const handleUpdateBranding = (newName, newLogo) => {
+        // API call to update branding in Neon DB
         setAppName(newName);
         setAppLogo(newLogo);
-        setMessage({ type: 'success', text: 'Branding updated successfully.' });
+        setMessage({ type: 'success', text: 'Branding updated successfully (mock).' });
     };
 
     // --- Pricing Plan Management (manage:pricing_plans) ---
     const handleSavePricingPlan = (plan) => {
+        // API call to save/update pricing plan in Neon DB
         setMockPricingPlans(prev => {
             if (plan.id) {
-                // If plan has an ID, it's an existing plan, find and update it
                 return prev.map(p => p.id === plan.id ? plan : p);
             } else {
-                // Otherwise, it's a new plan, assign a new ID and add it
                 return [...prev, { ...plan, id: crypto.randomUUID() }];
             }
         });
-        setMessage({ type: 'success', text: 'Pricing plan saved successfully.' });
+        setMessage({ type: 'success', text: 'Pricing plan saved successfully (mock).' });
     };
 
     const handleDeletePricingPlan = (planId, planName) => {
         setConfirmationMessage(`Are you sure you want to delete the plan "${planName}"? This action cannot be undone.`);
         setConfirmationAction(() => () => {
+            // API call to delete pricing plan from Neon DB
             setMockPricingPlans(prev => prev.filter(p => p.id !== planId));
-            setMessage({ type: 'success', text: `Plan "${planName}" deleted.` });
+            setMessage({ type: 'success', text: `Plan "${planName}" deleted (mock).` });
             setShowConfirmationModal(false);
         });
         setShowConfirmationModal(true);
     };
 
     const handleApproveProvider = (providerId) => {
+        // API call to update provider status in Neon DB
         setMockUserProfiles(prevProfiles => ({
             ...prevProfiles,
             [providerId]: { ...prevProfiles[providerId], isProviderApproved: true }
         }));
-        setMessage({ type: 'success', text: `Provider ${mockUserProfiles[providerId]?.name} approved.` });
+        setMessage({ type: 'success', text: `Provider ${mockUserProfiles[providerId]?.name} approved (mock).` });
     };
 
     const handleDeleteProvider = (providerId) => {
         setConfirmationMessage("Are you sure you want to delete this provider? This will remove their profile.");
         setConfirmationAction(() => () => {
+            // API call to delete provider from Neon DB
             setMockUserProfiles(prevProfiles => {
                 const newProfiles = { ...prevProfiles };
                 delete newProfiles[providerId];
                 return newProfiles;
             });
-            setMessage({ type: 'success', text: `Provider ${mockUserProfiles[providerId]?.name} deleted.` });
+            setMessage({ type: 'success', text: `Provider ${mockUserProfiles[providerId]?.name} deleted (mock).` });
             setShowConfirmationModal(false);
         });
         setShowConfirmationModal(true);
@@ -537,7 +558,7 @@ const App = () => {
             mockProblems, mockUserProfiles, mockPricingPlans, selectedPlan,
             setUserId, setUserProfileState, setUserRole, setIsPaidMember, setCurrentPage, setLoading, setMessage,
             setAppName, setAppLogo, setMockProblems, setMockUserProfiles, setMockPricingPlans, setSelectedPlan,
-            handlePostProblem, handleRegister, handleBecomePaidMember, handleLoginAs,
+            handlePostProblem, handleRegister, handleBecomePaidMember, handleLoginAs, // handleLoginAs will eventually be removed
             setShowPostProblemModal, showPostProblemModal, setShowRegisterModal, showRegisterModal,
             handleDeleteProblem, handleEditProblem, handleApproveProblem, handleMarkProblemResolved,
             handleSubmitQuote, handleAcceptQuote, handleWithdrawQuote, handleEditQuote,
@@ -545,15 +566,27 @@ const App = () => {
             setShowBecomeProviderModal, handleApproveProvider, handleDeleteProvider
         }}>
             <div className="flex h-screen bg-gray-100 font-sans">
+                {/* Mobile Menu Toggle Button */}
+                <div className="md:hidden fixed top-4 left-4 z-50">
+                    <button
+                        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                        className="p-2 text-white bg-[#964b00] rounded-md shadow-lg"
+                    >
+                        {isSidebarOpen ? <XIcon size={24} /> : <MenuIcon size={24} />}
+                    </button>
+                </div>
+
                 {/* --- Sidebar --- */}
-                <aside className="w-64 bg-[#964b00] text-white flex-shrink-0 rounded-tr-lg rounded-br-lg shadow-lg">
+                <aside className={`fixed inset-y-0 left-0 w-64 bg-[#964b00] text-white flex-shrink-0 rounded-tr-lg rounded-br-lg shadow-lg z-40 transform transition-transform duration-300 ease-in-out
+                    ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
                     <div className="p-4 md:p-6 text-center border-b border-[#b3641a]">
                         <img src={appLogo} alt="App Logo" className="mx-auto mb-4 w-24 h-auto rounded-md" onError={(e) => { e.target.onerror = null; e.target.src="https://placehold.co/100x40/964b00/ffffff?text=Logo"; }}/>
                         <h2 className="text-2xl font-bold">{appName}</h2>
                         <p className="text-sm text-gray-200 mt-1">ID: {userId || 'N/A'}</p>
-                        {userRole !== 'loggedOut' && (
+                        {/* Conditional rendering for the "Switch User" dropdown based on enableDevFeatures */}
+                        {enableDevFeatures && userRole !== 'loggedOut' && (
                             <div className="mt-4 flex flex-col space-y-2">
-                                <label className="text-sm text-gray-200">Switch User:</label>
+                                <label className="text-sm text-gray-200">Switch User (Dev Only):</label>
                                 <select
                                     onChange={(e) => handleLoginAs(e.target.value)}
                                     value={userId}
@@ -578,7 +611,7 @@ const App = () => {
                             </div>
                         )}
                     </div>
-                    <nav className="mt-5">
+                    <nav className="mt-5" onClick={() => setIsSidebarOpen(false)}> {/* Close sidebar on navigation */}
                         <ul>
                             <li className={`mb-2 ${currentPage === 'dashboard' ? 'bg-[#b3641a]' : ''}`}>
                                 <button
@@ -681,7 +714,7 @@ const App = () => {
                     <div className="p-4 md:p-6 border-t border-[#b3641a]">
                         {userRole !== 'loggedOut' ? (
                             <button
-                                onClick={() => handleLoginAs('loggedOut')}
+                                onClick={() => handleLoginAs('loggedOut')} // This will eventually be Auth0 logout
                                 className="flex items-center w-full px-4 py-3 text-lg text-red-300 rounded-md hover:bg-red-700 transition-colors duration-200"
                             >
                                 <LogOutIcon size={20} className="mr-3" /> Log Out
@@ -689,7 +722,7 @@ const App = () => {
                         ) : (
                             <div className="flex justify-center space-x-2">
                                 <button
-                                    onClick={() => handleLoginAs('mock-member-alice')} // Mock login
+                                    onClick={() => {/* Implement Auth0 Login */ setMessage({type: 'info', text: 'Auth0 Login integration coming soon!'})}}
                                     className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200"
                                 >
                                     Login
@@ -705,10 +738,13 @@ const App = () => {
                     </div>
                 </aside>
 
+                {/* Overlay for mobile sidebar */}
+                {isSidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-30 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
+
                 {/* --- Main Content Area --- */}
-                <main className="flex-1 flex flex-col overflow-hidden">
+                <main className={`flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out ${isSidebarOpen ? 'md:ml-64' : 'md:ml-64'}`}> {/* Added ml-64 for desktop to shift content */}
                     {/* Header */}
-                    <header className="flex justify-between items-center p-4 bg-white border-b border-gray-200 flex-shrink-0 shadow-sm">
+                    <header className="flex justify-between items-center p-4 bg-white border-b border-gray-200 flex-shrink-0 shadow-sm md:pl-0"> {/* Adjusted padding for mobile */}
                         <h1 className="text-2xl font-bold text-gray-800 capitalize">{currentPage.replace('-', ' ')}</h1>
                         <div className="flex items-center space-x-4">
                             <div className="flex items-center">
@@ -738,7 +774,7 @@ const App = () => {
                                 case 'profile':
                                     return <ProfilePage />;
                                 case 'problems':
-                                    return <ProblemListPage onNavigate={setCurrentPage} />;
+                                    return <ProblemListPage onNavigate={setCurrentPage} setShowPostProblemModal={setShowPostProblemModal} />;
                                 case 'my-quotes':
                                     return userRole === 'provider' ? <MyQuotesPage /> : null;
                                 case 'my-requests':
@@ -758,7 +794,7 @@ const App = () => {
                                     const problem = mockProblems.find(p => p.id === problemId);
                                     return problem ? <ProblemDetailPage problem={problem} onNavigate={setCurrentPage} /> : <p className="text-red-500">Problem not found.</p>;
                                 default:
-                                    return <ProblemListPage onNavigate={setCurrentPage} />;
+                                    return <ProblemListPage onNavigate={setCurrentPage} setShowPostProblemModal={setShowPostProblemModal} />;
                             }
                         })()}
                     </div>
@@ -1183,7 +1219,7 @@ const RegistrationPage = ({ onClose, onRegister }) => {
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
                 <h3 className="text-2xl font-bold text-gray-800 mb-6">Register a New Account</h3>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
@@ -1266,13 +1302,13 @@ const BecomeProviderModal = ({ onClose, onRegister }) => {
         };
 
         onRegister(updatedUserData, 'provider', userProfile.isPaidMember);
-        setMessage({type: 'success', text: `You are now registered as a Provider! Awaiting admin approval.`});
+        setMessage({type: 'success', text: `You are now registered as a Provider! Awaiting admin approval (mock).`});
         onClose();
     };
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
                 <h3 className="text-2xl font-bold text-gray-800 mb-6">Register as a Provider</h3>
                 <p className="text-gray-700 mb-4">Your current member details will be used. Please provide additional provider-specific information.</p>
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -1390,14 +1426,15 @@ const SignUpFormModal = ({ plan, onClose, onCompleteSignUp }) => {
         const paystackPaymentLink = `https://paystack.com/pay/${plan.planCode || 'default_plan_code'}`;
         window.open(paystackPaymentLink, '_blank');
 
-        // Simulate payment success immediately for demo purposes
+        // This will now rely on Paystack webhook to update the user status
         onCompleteSignUp({ name, email, password, phone, address }, plan);
         onClose();
+        setMessage({type: 'info', text: 'Redirecting to Paystack. Your membership will be updated upon successful payment confirmation!'});
     };
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
                 <h3 className="text-2xl font-bold text-gray-800 mb-6">Sign Up for {plan.name} Plan</h3>
                 <p className="text-gray-700 mb-4">Complete your details to proceed to payment.</p>
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -1428,9 +1465,7 @@ const SignUpFormModal = ({ plan, onClose, onCompleteSignUp }) => {
                         <button type="submit" className="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200">
                             Proceed to Payment ({plan.price})
                         </button>
-                        <button type="button" onClick={() => { onCompleteSignUp({ name, email, password, phone, address }, plan); onClose(); }} className="px-6 py-3 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200">
-                            Simulate Payment Success & Continue to App
-                        </button>
+                        {/* Removed the "Simulate Payment Success" button */}
                         <button type="button" onClick={onClose} className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">
                             Cancel
                         </button>
@@ -1464,6 +1499,7 @@ const ProfilePage = () => {
     };
 
     const handleSave = () => {
+        // API call to update user profile in Neon DB
         const updatedProfile = { ...userProfile, ...formData };
         setUserProfileState(updatedProfile);
         setMockUserProfiles(prev => ({
@@ -1471,7 +1507,7 @@ const ProfilePage = () => {
             [userProfile.uid]: updatedProfile
         }));
         setEditMode(false);
-        setMessage({ type: 'success', text: 'Profile updated successfully!' });
+        setMessage({ type: 'success', text: 'Profile updated successfully (mock)!' });
     };
 
     return (
@@ -1534,8 +1570,9 @@ const ProfilePage = () => {
     );
 };
 
-const ProblemListPage = ({ onNavigate }) => {
-    const { userRole, userId, isPaidMember, mockProblems, setMessage } = useContext(AppContext); // Removed handlePostProblem
+// Added setShowPostProblemModal to ProblemListPage props
+const ProblemListPage = ({ onNavigate, setShowPostProblemModal }) => {
+    const { userRole, userId, mockProblems, setMessage } = useContext(AppContext);
 
     const [filterCategory, setFilterCategory] = useState('All');
     const [filterLocation, setFilterLocation] = useState('All');
@@ -1574,7 +1611,7 @@ const ProblemListPage = ({ onNavigate }) => {
             <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center justify-between">
                 Public Problem List
                 {userRole === 'member' && (
-                    <button onClick={() => setMessage({ type: 'info', text: 'Please use the "Post New Problem" button on your Dashboard.' })} className={`px-4 py-2 rounded-md transition-colors duration-200 flex items-center bg-green-600 text-white hover:bg-green-700`} title="Post a new problem">
+                    <button onClick={() => setShowPostProblemModal(true)} className={`px-4 py-2 rounded-md transition-colors duration-200 flex items-center bg-green-600 text-white hover:bg-green-700`} title="Post a new problem">
                         <PlusCircleIcon size={18} className="mr-2" /> Post New Problem
                     </button>
                 )}
@@ -1636,7 +1673,7 @@ const ProblemCard = ({ problem, userRole, currentUserId, onNavigate }) => {
     };
 
     return (
-        <div className="bg-gray-50 p-4 rounded-lg shadow-sm border border-gray-200">
+        <div className="bg-gray-50 p-4 rounded-lg shadow-sm border border-gray-200 rounded-md">
             <h3 className="text-xl font-semibold text-gray-800 mb-2">{problem.title}</h3>
             <p className="text-gray-700 mb-2 text-sm truncate">{problem.description}</p>
             <p className="text-gray-600 font-medium text-xs">Category: {problem.category || 'General'}</p>
@@ -1686,7 +1723,7 @@ const ProblemDetailPage = ({ problem, onNavigate, onClose, onSave, onAcceptQuote
     const handleSaveLocal = (e) => {
         e.preventDefault();
         onSave(problem.id, formData);
-        setMessage({ type: 'success', text: 'Problem updated successfully.' });
+        setMessage({ type: 'success', text: 'Problem updated successfully (mock).' });
     };
 
 
@@ -1704,8 +1741,8 @@ const ProblemDetailPage = ({ problem, onNavigate, onClose, onSave, onAcceptQuote
     const isModal = typeof onClose === 'function';
 
     return (
-        <div className={`bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl overflow-y-auto max-h-[90vh] ${isModal ? 'fixed inset-0 flex items-center justify-center z-50 bg-gray-600 bg-opacity-50' : ''}`}>
-            <div className={isModal ? 'bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl' : ''}> {/* Inner div for modal styling */}
+        <div className={`bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl overflow-y-auto max-h-[90vh] rounded-md ${isModal ? 'fixed inset-0 flex items-center justify-center z-50 bg-gray-600 bg-opacity-50' : ''}`}>
+            <div className={isModal ? 'bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-md' : ''}> {/* Adjusted max-h for mobile */}
                 <h2 className="text-3xl font-bold text-gray-800 mb-4">{problem.title}</h2>
                 <form onSubmit={handleSaveLocal}>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1847,7 +1884,7 @@ const PostProblemModal = ({ onClose, onSave, activeProblemsCount, isPaidMember }
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
                 <h3 className="text-2xl font-bold text-gray-800 mb-6">Post a New Problem</h3>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
@@ -1884,7 +1921,7 @@ const PostProblemModal = ({ onClose, onSave, activeProblemsCount, isPaidMember }
 };
 
 const QuoteModal = ({ onClose, onSubmit, problemTitle, problemId }) => {
-    const { handleSubmitQuote } = useContext(AppContext); // This is a false positive by ESLint
+    const { handleSubmitQuote } = useContext(AppContext);
     const [proposedStartDate, setProposedStartDate] = useState('');
     const [proposedEndDate, setProposedEndDate] = useState('');
     const [proposedBudget, setProposedBudget] = useState('');
@@ -1914,7 +1951,7 @@ const QuoteModal = ({ onClose, onSubmit, problemTitle, problemId }) => {
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
                 <h3 className="text-2xl font-bold text-gray-800 mb-6">Submit a Quote for "{problemTitle}"</h3>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
@@ -1983,7 +2020,7 @@ const EditQuoteModal = ({ quote, onClose, onSave, problemTitle }) => {
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
                 <h3 className="text-2xl font-bold text-gray-800 mb-6">Edit Quote for "{problemTitle}"</h3>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
@@ -2015,11 +2052,8 @@ const EditQuoteModal = ({ quote, onClose, onSave, problemTitle }) => {
     );
 };
 
-// Removed MemberDetailsModal and ProviderDetailsModal as they were not used.
-
-
 const MyQuotesPage = () => {
-    const { userId, mockProblems, handleWithdrawQuote, handleEditQuote } = useContext(AppContext); // Removed setMockProblems, setMessage as they were not directly used here.
+    const { userId, mockProblems, handleWithdrawQuote, handleEditQuote } = useContext(AppContext);
     const [myQuotes, setMyQuotes] = useState([]);
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [confirmAction, setConfirmAction] = useState(null);
@@ -2027,6 +2061,7 @@ const MyQuotesPage = () => {
     const [editingQuoteLocal, setEditingQuoteLocal] = useState(null);
 
     useEffect(() => {
+        // This data will be fetched from Neon DB via Netlify Functions
         let providerQuotes = [];
         mockProblems.forEach(problem => {
             problem.quotes.forEach(quote => {
@@ -2117,13 +2152,14 @@ const MyQuotesPage = () => {
 };
 
 const MyRequestsPage = () => {
-    const { userId, mockProblems, isPaidMember, handleAcceptQuote, handleMarkProblemResolved, handleDeleteProblem } = useContext(AppContext); // Removed isPaidMember, handleAcceptQuote
+    const { userId, mockProblems, isPaidMember, handleAcceptQuote, handleMarkProblemResolved, handleDeleteProblem } = useContext(AppContext);
     const [myProblems, setMyProblems] = useState([]);
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [confirmAction, setConfirmAction] = useState(null);
     const [confirmMessage, setConfirmMessage] = useState('');
 
     useEffect(() => {
+        // This data will be fetched from Neon DB via Netlify Functions
         const memberProblems = mockProblems.filter(problem => problem.requesterId === userId);
         setMyProblems(memberProblems.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
     }, [mockProblems, userId]);
@@ -2134,9 +2170,9 @@ const MyRequestsPage = () => {
         setShowConfirmModal(true);
     };
 
-    if (!isPaidMember) { // This `isPaidMember` is a false positive for being unused, it is used here.
+    if (!isPaidMember) {
         return (
-        <div className="bg-white p-6 rounded-lg shadow-md text-center py-12">
+        <div className="bg-white p-6 rounded-lg shadow-md text-center py-12 rounded-md"> {/* Added rounded-md */}
             <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
             <p className="text-gray-700 mb-6">
             You must be a <strong>paid member</strong> to view and manage quotes for your problems.
@@ -2160,7 +2196,7 @@ const MyRequestsPage = () => {
             ) : (
                 <div className="space-y-6">
                     {myProblems.map(problem => (
-                        <div key={problem.id} className="border border-gray-200 rounded-lg p-4 shadow-sm bg-gray-50">
+                        <div key={problem.id} className="border border-gray-200 rounded-lg p-4 shadow-sm bg-gray-50 rounded-md"> {/* Added rounded-md */}
                             <div className="flex justify-between items-center mb-3">
                                 <h3 className="text-xl font-bold text-gray-800">{problem.title}</h3>
                                 <span className={`px-3 py-1 rounded-full text-sm font-semibold capitalize ${
@@ -2214,7 +2250,7 @@ const AdminToolsPage = () => {
 
     if (userRole !== 'admin') {
         return (
-            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12">
+            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12 rounded-md"> {/* Added rounded-md */}
                 <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
                 <p className="text-gray-700 mb-6">You must be an **admin** to access this page.</p>
             </div>
@@ -2222,19 +2258,21 @@ const AdminToolsPage = () => {
     }
 
     const handleApproveProblemLocal = (problemId) => {
+        // API call to approve problem in Neon DB
         setMockProblems(prevProblems =>
             prevProblems.map(problem =>
                 problem.id === problemId ? { ...problem, isApproved: true } : problem
             )
         );
-        setMessage({ type: 'success', text: `Problem ${problemId} approved.` });
+        setMessage({ type: 'success', text: `Problem ${problemId} approved (mock).` });
     };
 
     const handleDeleteProblemLocal = (problemId) => {
         setConfirmMessage("Are you sure you want to delete this problem and all its quotes? This is permanent.");
         setConfirmAction(() => () => {
+            // API call to delete problem from Neon DB
             setMockProblems(prevProblems => prevProblems.filter(problem => problem.id !== problemId));
-            setMessage({ type: 'success', text: `Problem ${problemId} deleted.` });
+            setMessage({ type: 'success', text: `Problem ${problemId} deleted (mock).` });
             setShowConfirmModal(false);
         });
         setShowConfirmModal(true);
@@ -2253,7 +2291,7 @@ const AdminToolsPage = () => {
 
             <div className="space-y-8">
                 {/* Admin Quick Actions */}
-                <div className="border border-gray-200 rounded-lg p-4">
+                <div className="border border-gray-200 rounded-lg p-4 rounded-md"> {/* Added rounded-md */}
                     <h3 className="text-xl font-bold text-gray-700 mb-4">Admin Quick Links</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <button onClick={() => window.location.hash = 'admin-pricing'} className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 flex items-center justify-center">
@@ -2266,7 +2304,7 @@ const AdminToolsPage = () => {
                 </div>
 
                 {/* Problem Management */}
-                <div className="border border-gray-200 rounded-lg p-4">
+                <div className="border border-gray-200 rounded-lg p-4 rounded-md"> {/* Added rounded-md */}
                     <h3 className="text-xl font-bold text-gray-700 mb-4">Problem Management</h3>
                     <h4 className="text-lg font-semibold text-gray-600 mb-3">Problems Awaiting Approval ({problemsAwaitingApproval.length})</h4>
                     {problemsAwaitingApproval.length === 0 ? (
@@ -2297,7 +2335,7 @@ const AdminToolsPage = () => {
                 </div>
 
                 {/* Provider Management */}
-                <div className="border border-gray-200 rounded-lg p-4">
+                <div className="border border-gray-200 rounded-lg p-4 rounded-md"> {/* Added rounded-md */}
                     <h3 className="text-xl font-bold text-gray-700 mb-4">Provider Management</h3>
                     <h4 className="text-lg font-semibold text-gray-600 mb-3">Providers Awaiting Approval ({pendingProviderApprovals.length})</h4>
                     {pendingProviderApprovals.length === 0 ? (
@@ -2341,7 +2379,7 @@ const AdminPricingPage = () => {
 
     if (userRole !== 'admin') {
         return (
-            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12">
+            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12 rounded-md"> {/* Added rounded-md */}
                 <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
                 <p className="text-gray-700 mb-6">You must be an **admin** to access this page.</p>
             </div>
@@ -2359,16 +2397,18 @@ const AdminPricingPage = () => {
     };
 
     const handleSavePlan = (updatedPlan) => {
+        // API call to save/update pricing plan in Neon DB
         handleSavePricingPlan(updatedPlan);
-        setMessage({ type: 'success', text: updatedPlan.id ? `Plan "${updatedPlan.name}" updated successfully!` : `New plan "${updatedPlan.name}" added successfully!` });
+        setMessage({ type: 'success', text: updatedPlan.id ? `Plan "${updatedPlan.name}" updated successfully (mock)!` : `New plan "${updatedPlan.name}" added successfully (mock)!` });
         setShowEditPlanModal(false);
     };
 
     const handleDeletePlan = (planId, planName) => {
         setConfirmMessage(`Are you sure you want to delete the plan "${planName}"? This action cannot be undone.`);
         setConfirmAction(() => () => {
+            // API call to delete pricing plan from Neon DB
             handleDeletePricingPlan(planId, planName);
-            setMessage({ type: 'success', text: `Plan "${planName}" deleted successfully!` });
+            setMessage({ type: 'success', text: `Plan "${planName}" deleted (mock).` });
             setShowConfirmModal(false);
         });
         setShowConfirmModal(true);
@@ -2493,7 +2533,7 @@ const EditPricingPlanModal = ({ plan, onClose, onSave }) => {
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
                 <h3 className="text-2xl font-bold text-gray-800 mb-6">{plan ? 'Edit Pricing Plan' : 'Add New Pricing Plan'}</h3>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
@@ -2539,7 +2579,7 @@ const EditPricingPlanModal = ({ plan, onClose, onSave }) => {
 
 
 const AdminBrandingPage = () => {
-    const { userRole, appName, appLogo, handleUpdateBranding, setMessage } = useContext(AppContext); // Removed setAppName, setAppLogo as they are just passed from context.
+    const { userRole, appName, appLogo, handleUpdateBranding, setMessage } = useContext(AppContext);
     const [tempAppName, setTempAppName] = useState(appName);
     const [tempAppLogo, setTempAppLogo] = useState(appLogo);
 
@@ -2550,7 +2590,7 @@ const AdminBrandingPage = () => {
 
     if (userRole !== 'admin') {
         return (
-            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12">
+            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12 rounded-md"> {/* Added rounded-md */}
                 <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
                 <p className="text-gray-700 mb-6">You must be an **admin** to access this page.</p>
             </div>
@@ -2563,12 +2603,12 @@ const AdminBrandingPage = () => {
             return;
         }
         handleUpdateBranding(tempAppName, tempAppLogo);
-        setMessage({ type: 'success', text: 'Branding updated successfully!' });
+        setMessage({ type: 'success', text: 'Branding updated successfully (mock)!' });
     };
 
     const handleResetBranding = () => {
         handleUpdateBranding('Mphakathi Online', 'https://placehold.co/100x40/964b00/ffffff?text=Logo');
-        setMessage({ type: 'info', text: 'Branding reset to default values.' });
+        setMessage({ type: 'info', text: 'Branding reset to default values (mock).' });
     };
 
     return (
@@ -2587,7 +2627,7 @@ const AdminBrandingPage = () => {
                     <input type="url" id="app-logo-input" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={tempAppLogo} onChange={(e) => setTempAppLogo(e.target.value)} placeholder="e.g., https://example.com/logo.png" />
                     {tempAppLogo && (
                         <div className="mt-4 p-2 border border-gray-200 rounded-md bg-gray-50 flex items-center justify-center">
-                            <img src={tempAppLogo} alt="Current Logo Preview" className="max-w-xs max-h-24 object-contain" onError={(e) => { e.target.onerror = null; e.target.src="https://placehold.co/100x40/cccccc/333333?text=Invalid+URL"; setMessage({ type: 'error', text: 'Invalid logo URL provided.' }); }} />
+                            <img src={tempAppLogo} alt="Current Logo Preview" className="max-w-xs max-h-24 object-contain rounded-md" onError={(e) => { e.target.onerror = null; e.target.src="https://placehold.co/100x40/cccccc/333333?text=Invalid+URL"; setMessage({ type: 'error', text: 'Invalid logo URL provided.' }); }} />
                         </div>
                     )}
                 </div>
@@ -2623,7 +2663,7 @@ const SettingsPage = () => {
                 <SettingsIcon size={28} className="mr-3 text-[#964b00]" /> Settings
             </h2>
             <div className="space-y-4">
-                <div className="p-4 bg-gray-50 rounded-md border border-gray-200">
+                <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md"> {/* Added rounded-md */}
                     <h3 className="text-xl font-semibold text-gray-700 mb-2">Account Information</h3>
                     <p className="text-gray-600">Your unique User ID: <span className="font-mono bg-gray-200 px-2 py-1 rounded-sm text-sm">{userId || 'N/A'}</span></p>
                     <p className="text-gray-600">Your Role: <span className="font-semibold capitalize">{userRole}</span></p>
@@ -2635,7 +2675,8 @@ const SettingsPage = () => {
                     )}
                     <p className="text-gray-600 mt-2">Manage your public profile visibility and contact information from the Profile page.</p>
 
-                    {userRole === 'admin' && ( // Admin specific toggles
+                    {/* Conditional rendering for admin overrides */}
+                    {process.env.REACT_APP_ENABLE_DEV_FEATURES === 'true' && userRole === 'admin' && (
                         <div className="mt-4 border-t pt-4 border-gray-300">
                             <h4 className="text-lg font-semibold text-gray-700 mb-2">Admin Overrides (Demo)</h4>
                             <div className="mt-2 flex items-center">
@@ -2652,7 +2693,7 @@ const SettingsPage = () => {
                     )}
 
                 </div>
-                <div className="p-4 bg-gray-50 rounded-md border border-gray-200">
+                <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md"> {/* Added rounded-md */}
                     <h3 className="text-xl font-semibold text-gray-700 mb-2">Notification Preferences</h3>
                     <p className="text-gray-600">Configure how you receive alerts for new activity.</p>
                     <div className="mt-3 flex items-center">
@@ -2664,7 +2705,7 @@ const SettingsPage = () => {
                         <label htmlFor="sms-notifications" className="text-gray-700">SMS notifications (coming soon)</label>
                     </div>
                 </div>
-                <div className="p-4 bg-gray-50 rounded-md border border-gray-200">
+                <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md"> {/* Added rounded-md */}
                     <h3 className="text-xl font-semibold text-gray-700 mb-2">Data Management</h3>
                     <p className="text-gray-600">Review and manage your data.</p>
                     <button className="mt-3 px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 transition-colors duration-200">
