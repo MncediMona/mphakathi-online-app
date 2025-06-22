@@ -1,19 +1,21 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import {
   HomeIcon, UserIcon, FileTextIcon, PackageIcon,
   ShieldCheckIcon, SettingsIcon, LogOutIcon, BriefcaseIcon, PlusCircleIcon,
   EditIcon, CheckCircleIcon, XCircleIcon, DollarSignIcon, CheckCircle2Icon,
   PaintbrushIcon, MenuIcon, XIcon // Added MenuIcon and XIcon for mobile sidebar
 } from 'lucide-react';
+import { useAuth0 } from '@auth0/auth0-react'; // Import Auth0 hook
+// Removed 'usePaystackPayment' as it's not being actively used with the current payment flow
 
-// AppContext definition
-const AppContext = createContext(null);
+// AppContext definition - This context will now provide Auth0-derived user info and API functions
+export const AppContext = createContext(null);
 
 // =========================================================================
 // GLOBAL CONSTANTS AND HELPER FUNCTIONS GO HERE:
 // =========================================================================
 
-// Custom Confirmation Modal
+// Custom Confirmation Modal - Reusable UI for confirmations
 const ConfirmationModal = ({ message, onConfirm, onCancel, confirmText = "Confirm", cancelText = "Cancel" }) => {
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -42,29 +44,18 @@ const ConfirmationModal = ({ message, onConfirm, onCancel, confirmText = "Confir
 // YOUR MAIN REACT COMPONENT DEFINITION STARTS HERE
 // =========================================================================
 const App = () => {
-    // --- Mock Data and State ---
-    const [userId, setUserId] = useState('loggedOut'); // Start as logged out by default
-    const [userProfile, setUserProfileState] = useState(() => ({
-        uid: '',
-        name: 'Guest User',
-        email: '',
-        phone: '',
-        role: 'loggedOut',
-        isProviderApproved: false,
-        isPaidMember: false,
-        bio: '',
-        address: '',
-        companyName: undefined,
-        specialties: undefined,
-    }));
-    const [userRole, setUserRole] = useState(userProfile.role);
-    const [isPaidMember, setIsPaidMember] = useState(userProfile.isPaidMember);
-    const [currentPage, setCurrentPage] = useState('problems'); // Set problem list as main feature
-    const [loading, setLoading] = useState(false);
+    // Auth0 hooks for authentication state and token retrieval
+    const { user, isAuthenticated, getAccessTokenSilently, loginWithRedirect, logout } = useAuth0(); // Removed authLoading as it was unused
+
+    // --- State Management for Application Data and UI ---
+    const [userProfile, setUserProfile] = useState(null); // Will store DB profile, not mock
+    const [userRole, setUserRole] = useState('loggedOut'); // Derived from userProfile
+    const [isPaidMember, setIsPaidMember] = useState(false); // Derived from userProfile
+    const [currentPage, setCurrentPage] = useState('problems'); // Default page
+    const [loading, setLoading] = useState(false); // Global loading indicator
     const [showPostProblemModal, setShowPostProblemModal] = useState(false);
-    const [showRegisterModal, setShowRegisterModal] = useState(false);
-    const [selectedPlan, setSelectedPlan] = useState(null);
-    const [message, setMessage] = useState({ type: '', text: '' });
+    const [selectedPlan, setSelectedPlan] = useState(null); // For pricing plan selection
+    const [message, setMessage] = useState(null); // Global message/notification system
     const [showConfirmationModal, setShowConfirmationModal] = useState(false);
     const [confirmationMessage, setConfirmationMessage] = useState('');
     const [confirmationAction, setConfirmationAction] = useState(null);
@@ -72,466 +63,467 @@ const App = () => {
     const [submittingQuoteForProblem, setSubmittingQuoteForProblem] = useState(null);
     const [editingQuote, setEditingQuote] = useState(null);
     const [showBecomeProviderModal, setShowBecomeProviderModal] = useState(false);
-    const [currentEditingPlan, setCurrentEditingPlan] = useState(null);
+    const [currentEditingPlan, setCurrentEditingPlan] = useState(null); // For admin pricing plan edit
 
-    // Global App Branding State
+    // Global App Branding State - Will be fetched from backend
     const [appName, setAppName] = useState(process.env.REACT_APP_APP_NAME || 'Mphakathi Online');
     const [appLogo, setAppLogo] = useState(process.env.REACT_APP_APP_LOGO || 'https://placehold.co/100x40/964b00/ffffff?text=Logo');
 
     // State for mobile sidebar
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-    // Environment variable to control dev features
-    const enableDevFeatures = process.env.REACT_APP_ENABLE_DEV_FEATURES === 'true'; // Set this in Netlify for dev builds, leave false or unset for production
+    // Environment variable to control dev features (from Netlify ENV)
+    const enableDevFeatures = process.env.REACT_APP_ENABLE_DEV_FEATURES === 'true';
 
-    // Mock data storage (in-memory, resets on refresh) - WILL BE REPLACED BY DATABASE CALLS
-    const [mockProblems, setMockProblems] = useState([
-        {
-            id: 'problem-1',
-            title: 'Leaky Faucet Repair',
-            description: 'My kitchen faucet has a steady drip, needs repair or replacement.',
-            category: 'Plumbing',
-            location: 'Pretoria',
-            estimatedBudget: 500,
-            requesterId: 'mock-member-alice',
-            status: 'open',
-            isApproved: true,
-            createdAt: new Date(Date.now() - 86400000 * 5),
-            quotes: [
-                { id: 'quote-1a', providerId: 'mock-provider-alpha', providerName: 'Alpha Services', amount: 150, details: 'Standard repair, parts included.', status: 'pending', proposedStartDate: '2025-07-01', proposedEndDate: '2025-07-02', createdAt: new Date(Date.now() - 86400000 * 4) },
-                { id: 'quote-1b', providerId: 'mock-provider-beta', providerName: 'Beta Fixers', amount: 120, details: 'Will inspect and fix, lowest price.', status: 'pending', proposedStartDate: '2025-07-03', proposedEndDate: '2025-07-03', createdAt: new Date(Date.now() - 86400000 * 3) },
-            ]
-        },
-        {
-            id: 'problem-2',
-            title: 'Garden Landscaping',
-            description: 'Need basic landscaping for a small backyard. Ideas welcome.',
-            category: 'Gardening',
-            location: 'Durban',
-            estimatedBudget: 2500,
-            requesterId: 'mock-member-bob',
-            status: 'open',
-            isApproved: true,
-            createdAt: new Date(Date.now() - 86400000 * 2),
-            quotes: [
-                { id: 'quote-2a', providerId: 'mock-provider-charlie', providerName: 'Charlie Gardens', amount: 500, details: 'Includes design and plant selection.', status: 'pending', proposedStartDate: '2025-07-10', proposedEndDate: '2025-07-15', createdAt: new Date(Date.now() - 86400000 * 1) },
-            ]
-        },
-        {
-            id: 'problem-3',
-            title: 'Broken Washing Machine',
-            description: 'Washing machine not spinning. Believe it is a motor issue.',
-            category: 'Appliance Repair',
-            location: 'Cape Town',
-            estimatedBudget: 800,
-            requesterId: 'mock-member-bob',
-            status: 'closed',
-            isApproved: true,
-            acceptedQuoteId: 'quote-3b',
-            createdAt: new Date(Date.now() - 86400000 * 10),
-            quotes: [
-                { id: 'quote-3a', providerId: 'mock-provider-delta', providerName: 'Delta Appliances', amount: 300, details: 'Motor replacement cost.', status: 'pending', proposedStartDate: '2025-06-20', proposedEndDate: '2025-06-21', createdAt: new Date(Date.now() - 86400000 * 9) },
-                { id: 'quote-3b', providerId: 'mock-provider-epsilon', providerName: 'Epsilon Repairs', amount: 250, details: 'Quick diagnosis and repair.', status: 'accepted', proposedStartDate: '2025-06-22', proposedEndDate: '2025-06-22', createdAt: new Date(Date.now() - 86400000 * 8) },
-            ]
-        },
-    ]);
-    const [mockUserProfiles, setMockUserProfiles] = useState({
-        'mock-member-alice': { uid: 'mock-member-alice', name: 'Alice Member', email: 'alice@example.com', phone: '071-123-4567', role: 'member', isPaidMember: true, bio: 'A mock user looking for help.', address: '456 Oak Avenue, Johannesburg' },
-        'mock-member-bob': { uid: 'mock-member-bob', name: 'Bob Member', email: 'bob@example.com', phone: '082-222-3333', role: 'member', isPaidMember: false, bio: 'Another mock user.', address: '789 Pine Street, Cape Town' },
-        'mock-provider-alpha': { uid: 'mock-provider-alpha', name: 'Alpha Services', email: 'alpha@example.com', phone: '060-111-2222', role: 'provider', isProviderApproved: true, companyName: 'Alpha Plumbing', specialties: 'Plumbing', bio: 'Expert plumbers in Gauteng.', address: '101 Pipe Rd, Pretoria' },
-        'mock-provider-beta': { uid: 'mock-provider-beta', name: 'Beta Fixers', email: 'beta@example.com', phone: '073-333-4444', role: 'provider', isProviderApproved: true, companyName: 'Beta General', specialties: 'General Handyman', bio: 'Reliable handymen for all your needs.', address: '202 Tool St, Durban' },
-        'mock-provider-charlie': { uid: 'mock-provider-charlie', name: 'Charlie Gardens', email: 'charlie@example.com', phone: '084-555-6666', role: 'provider', isProviderApproved: false, companyName: 'Charlie Landscaping', specialties: 'Landscaping', bio: 'Creative landscaping solutions.', address: '303 Green Ave, Cape Town' },
-        'mock-provider-delta': { uid: 'mock-provider-delta', name: 'Delta Appliances', email: 'delta@example.com', phone: '079-777-8888', role: 'provider', isProviderApproved: true, companyName: 'Delta Repairs', specialties: 'Appliance Repair', bio: 'Fast and affordable appliance repairs.', address: '404 Repair Ln, Johannesburg' },
-        'mock-provider-epsilon': { uid: 'mock-provider-epsilon', name: 'Epsilon Repairs', email: 'epsilon@example.com', phone: '081-999-0000', role: 'provider', isProviderApproved: true, companyName: 'Epsilon Tech', specialties: 'Electronics Repair', bio: 'Specializing in electronics repair.', address: '505 Circuit Rd, Pretoria' },
-        'admin-user': { uid: 'admin-user', name: 'Admin Account', email: 'admin@example.com', phone: '000-000-0000', role: 'admin', isProviderApproved: undefined, isPaidMember: undefined, bio: 'System administrator.', address: 'Admin HQ' }
-    });
-    // Updated mock pricing plans with new features and details
-    const [mockPricingPlans, setMockPricingPlans] = useState([
-        {
-            id: 'bronze-plan',
-            name: 'Bronze',
-            price: 'R50/month',
-            rawPrice: 50,
-            interval: 'monthly',
-            features: [
-                'For unskilled & students',
-                'Post up to 5 problems',
-                'View basic problem details',
-                'Community support',
-                'Budget limit: R500 per transaction',
-                'Limited to 50 quotes',
-                'Category specific',
-                'Specific location'
-            ],
-            paystackLink: 'https://paystack.shop/pay/PLN_ot4wcmec30yw311',
-            planCode: 'PLN_ot4wcmec30yw311'
-        },
-        {
-            id: 'silver-plan',
-            name: 'Silver',
-            price: 'R150/month',
-            rawPrice: 150,
-            interval: 'monthly',
-            features: [
-                'For skilled individuals',
-                'Unlimited problem posts',
-                'View all problem details',
-                'Submit and manage quotes (limited to 150)',
-                'Priority support',
-                'Budget limit: R1500 per transaction',
-                'Up to 5 categories',
-                'Provincial'
-            ],
-            paystackLink: 'https://paystack.shop/pay/PLN_9zom3j5yjqjox10',
-            planCode: 'PLN_9zom3j5yjqjox10'
-        },
-        {
-            id: 'gold-plan',
-            name: 'Gold',
-            price: 'R300/month',
-            rawPrice: 300,
-            interval: 'monthly',
-            features: [
-                'For professionals & small businesses',
-                'All Silver features',
-                'Advanced analytics',
-                'Dedicated account manager',
-                'Early access to features',
-                'Budget limit: R10,000 per transaction',
-                'Limited to 500 quotes',
-                'Up to 20 categories',
-                '3 province locations'
-            ],
-            paystackLink: 'https://paystack.shop/pay/PLN_2cun96f18ckdlzd',
-            planCode: 'PLN_2cun96f18ckdlzd'
-        },
-        {
-            id: 'platinum-plan',
-            name: 'Platinum',
-            price: 'Contact us for price',
-            rawPrice: 0,
-            interval: 'custom',
-            features: [
-                'For large businesses',
-                'All Gold features',
-                'Premium partner listings',
-                'Exclusive workshops',
-                'API access',
-                'Unlimited budget',
-                'Unlimited quotes',
-                'Unlimited categories',
-                'Global locations'
-            ],
-            paystackLink: null,
-            planCode: null
-        },
-    ]);
+    // --- Data States (No longer mock, will be populated by API calls) ---
+    const [problems, setProblems] = useState([]); // List of problems from DB
+    const [allUsers, setAllUsers] = useState([]); // All user profiles (for admin)
+    const [pricingPlans, setPricingPlans] = useState([]); // Pricing plans from DB
 
+    // --- Utility Function for API Calls (DRY principle) ---
+    // Wrapped in useCallback to make it stable for useEffect dependencies
+    const makeAuthenticatedRequest = useCallback(async (url, method, body = null) => {
+        setLoading(true);
+        try {
+            const accessToken = await getAccessTokenSilently({
+                authorizationParams: {
+                    audience: process.env.REACT_APP_AUTH0_API_AUDIENCE,
+                },
+            });
 
-    // Effect to initialize user profile on first load - this mock logic will be replaced by Auth0
-    useEffect(() => {
-        if (userProfile.uid === '') {
-            const newUserId = crypto.randomUUID();
-            setUserId(newUserId);
-            setUserProfileState(prev => ({ ...prev, uid: newUserId }));
-            setMockUserProfiles(prev => ({
-                ...prev,
-                [newUserId]: { ...userProfile, uid: newUserId }
-            }));
-        } else {
-            setMockUserProfiles(prev => ({
-                ...prev,
-                [userId]: { ...prev[userId], ...userProfile, uid: userId }
-            }));
+            const options = {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${accessToken}`,
+                },
+            };
+            if (body) {
+                options.body = JSON.stringify(body);
+            }
+
+            const response = await fetch(url, options);
+            const responseData = await response.json();
+
+            if (!response.ok) {
+                throw new Error(responseData.error || `HTTP error! Status: ${response.status}`);
+            }
+            return responseData;
+        } catch (error) {
+            console.error(`API Call Error (${method} ${url}):`, error);
+            setMessage({ type: 'error', text: `Operation failed: ${error.message}` });
+            throw error; // Re-throw to allow specific error handling in calling functions
+        } finally {
+            setLoading(false);
         }
-    }, [userId, userProfile, setMockUserProfiles]);
+    }, [getAccessTokenSilently, setMessage]); // Depend on getAccessTokenSilently and setMessage
+
+    // --- Effects for Initial Data Loading and User Profile Sync ---
+
+    // Effect to fetch or create user profile in your DB after Auth0 login
+    useEffect(() => {
+        const fetchOrCreateUserProfile = async () => {
+            if (!isAuthenticated || !user) {
+                // If not authenticated or user object is not available, reset profile and role
+                setUserProfile(null);
+                setUserRole('loggedOut'); // Reset role for guest/loggedOut
+                setIsPaidMember(false);
+                return;
+            }
+
+            setLoading(true); // Set global loading for profile fetch
+            try {
+                // Call your Netlify Function to get or create the user's database profile
+                // The `makeAuthenticatedRequest` handles token retrieval and error logging
+                const profileData = await makeAuthenticatedRequest(
+                    '/.netlify/functions/get-or-create-user-profile',
+                    'POST',
+                    { auth0Id: user.sub, email: user.email, name: user.name }
+                );
+
+                setUserProfile(profileData);
+                setUserRole(profileData.role || 'member'); // Set role from DB profile
+                setIsPaidMember(profileData.is_paid_member || false); // Set paid status from DB
+                setMessage({ type: 'success', text: `Welcome, ${profileData.name || 'User'}!` });
+            } catch (error) {
+                console.error('Error fetching or creating user profile:', error);
+                setMessage({ type: 'error', text: `Failed to load profile: ${error.message}` });
+            } finally {
+                setLoading(false); // Clear global loading
+            }
+        };
+
+        fetchOrCreateUserProfile();
+    }, [isAuthenticated, user, makeAuthenticatedRequest, setMessage]); // Added makeAuthenticatedRequest and setMessage to dependencies
+
+    // Effect to fetch branding on initial load
+    useEffect(() => {
+        const fetchBranding = async () => {
+            try {
+                const response = await fetch('/.netlify/functions/get-branding');
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                setAppName(data.app_name || 'Mphakathi Online');
+                setAppLogo(data.app_logo_url || 'https://placehold.co/100x40/964b00/ffffff?text=Logo');
+            } catch (error) {
+                console.error('Failed to fetch branding:', error);
+                setMessage({ type: 'error', text: `Failed to load branding: ${error.message}` });
+            }
+        };
+        fetchBranding();
+    }, [setMessage]); // Depend on setMessage
+
+    // Effect to fetch pricing plans on initial load
+    useEffect(() => {
+        const fetchPlans = async () => {
+            try {
+                const response = await fetch('/.netlify/functions/get-pricing-plans');
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                setPricingPlans(data);
+            } catch (error) {
+                console.error('Failed to fetch pricing plans:', error);
+                setMessage({ type: 'error', text: `Failed to load pricing plans: ${error.message}` });
+            }
+        };
+        fetchPlans();
+    }, [setMessage]); // Depend on setMessage
 
     // --- Handlers for Problem Management ---
-    const handlePostProblem = (problemData) => {
-        // In a real app, this would be an API call to save to Neon DB
-        const newProblem = {
-            id: crypto.randomUUID(),
-            title: problemData.title,
-            description: problemData.description,
-            category: problemData.category,
-            location: problemData.location,
-            estimatedBudget: parseFloat(problemData.estimatedBudget),
-            requesterId: userId, // This would be the actual Auth0 user ID
-            status: 'open',
-            isApproved: userRole === 'admin', // Admin approval logic would be server-side
-            createdAt: new Date(),
-            quotes: []
-        };
-        setMockProblems(prevProblems => [newProblem, ...prevProblems]);
-        setShowPostProblemModal(false);
-        setMessage({ type: 'success', text: 'Problem posted successfully! Awaiting admin approval (mock).' });
+    const fetchPublicProblems = useCallback(async () => {
+        setLoading(true);
+        try {
+            const response = await fetch('/.netlify/functions/get-problems');
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            setProblems(data);
+        } catch (error) {
+            console.error('Error fetching public problems:', error);
+            setMessage({ type: 'error', text: `Failed to load problems: ${error.message}` });
+        } finally {
+            setLoading(false);
+        }
+    }, [setMessage]); // Depend on setMessage
+
+    const fetchMyProblems = useCallback(async () => {
+        if (!userProfile) return;
+        setLoading(true);
+        try {
+            const data = await makeAuthenticatedRequest('/.netlify/functions/get-my-problems', 'GET');
+            setProblems(data); // Re-use problems state for my problems
+        } catch (error) {
+            console.error('Error fetching my problems:', error);
+        } finally {
+            setLoading(false);
+        }
+    }, [userProfile, makeAuthenticatedRequest]); // Depend on userProfile and makeAuthenticatedRequest
+
+    const handlePostProblem = async (problemData) => {
+        if (!userProfile) {
+            setMessage({ type: 'error', text: 'Please log in to post a problem.' });
+            return;
+        }
+        try {
+            await makeAuthenticatedRequest('/.netlify/functions/post-problem', 'POST', problemData);
+            setMessage({ type: 'success', text: 'Problem posted successfully! It will be visible after admin approval.' });
+            setShowPostProblemModal(false);
+            fetchPublicProblems(); // Refresh public problems list
+        } catch (error) {
+            // Error handled by makeAuthenticatedRequest
+        }
     };
 
-    const handleDeleteProblem = (problemId) => {
-        setConfirmationMessage('Are you sure you want to delete this problem? This action cannot be undone.');
-        setConfirmationAction(() => () => {
-            // API call to delete from Neon DB
-            setMockProblems(prevProblems => prevProblems.filter(p => p.id !== problemId));
-            setMessage({ type: 'success', text: 'Problem deleted successfully (mock).' });
-            setShowConfirmationModal(false);
+    const handleDeleteProblem = async (problemId) => {
+        triggerConfirmation('Are you sure you want to delete this problem and all associated quotes? This action cannot be undone.', async () => {
+            try {
+                await makeAuthenticatedRequest('/.netlify/functions/delete-problem', 'DELETE', { problemId });
+                setMessage({ type: 'success', text: 'Problem deleted successfully.' });
+                fetchPublicProblems(); // Refresh public problems list
+                fetchMyProblems(); // Refresh my problems list
+                setShowConfirmationModal(false);
+            } catch (error) {
+                // Error handled by makeAuthenticatedRequest
+            }
         });
-        setShowConfirmationModal(true);
     };
 
-    const handleEditProblem = (problemId, updatedData) => {
-        // API call to update problem in Neon DB
-        setMockProblems(prevProblems => prevProblems.map(p =>
-            p.id === problemId ? { ...p, ...updatedData } : p
-        ));
-        setMessage({ type: 'success', text: 'Problem updated successfully (mock).' });
+    const handleEditProblem = async (problemId, updatedData) => {
+        try {
+            await makeAuthenticatedRequest('/.netlify/functions/update-problem', 'PUT', { problemId, ...updatedData });
+            setMessage({ type: 'success', text: 'Problem updated successfully.' });
+            setEditingProblem(null); // Close modal if it was open
+            fetchPublicProblems(); // Refresh
+            fetchMyProblems(); // Refresh
+        } catch (error) {
+            // Error handled by makeAuthenticatedRequest
+        }
     };
 
-    const handleApproveProblem = (problemId) => {
-        // API call to update problem status in Neon DB
-        setMockProblems(prevProblems => prevProblems.map(p =>
-            p.id === problemId ? { ...p, isApproved: true, status: 'open' } : p
-        ));
-        setMessage({ type: 'success', text: 'Problem approved and made public (mock).' });
+    const handleApproveProblem = async (problemId) => {
+        try {
+            await makeAuthenticatedRequest('/.netlify/functions/update-problem', 'PUT', { problemId, is_approved: true, status: 'open' });
+            setMessage({ type: 'success', text: 'Problem approved and made public.' });
+            fetchPublicProblems(); // Refresh
+            fetchMyProblems(); // Refresh (in case it's in their list)
+        } catch (error) {
+            // Error handled by makeAuthenticatedRequest
+        }
     };
 
-    const handleMarkProblemResolved = (problemId) => {
-        // API call to update problem status in Neon DB
-        setMockProblems(prevProblems => prevProblems.map(p =>
-            p.id === problemId ? { ...p, status: 'resolved' } : p
-        ));
-        setMessage({ type: 'success', text: 'Problem marked as resolved (mock).' });
+    const handleMarkProblemResolved = async (problemId) => {
+        triggerConfirmation("Are you sure you want to mark this problem as resolved?", async () => {
+            try {
+                await makeAuthenticatedRequest('/.netlify/functions/update-problem', 'PUT', { problemId, status: 'resolved' });
+                setMessage({ type: 'success', text: 'Problem marked as resolved.' });
+                fetchPublicProblems();
+                fetchMyProblems();
+                setShowConfirmationModal(false);
+            } catch (error) {
+                // Error handled by makeAuthenticatedRequest
+            }
+        });
     };
-
 
     // --- Handlers for Quote Management ---
-    const handleSubmitQuote = (problemId, quoteData) => {
-        // API call to save quote to Neon DB
-        setMockProblems(prevProblems => prevProblems.map(problem => {
-            if (problem.id === problemId) {
-                const newQuote = {
-                    id: crypto.randomUUID(),
-                    providerId: userId, // This would be the actual Auth0 user ID
-                    providerName: userProfile.name,
-                    amount: parseFloat(quoteData.proposedBudget),
-                    details: quoteData.motivation,
-                    proposedStartDate: quoteData.proposedStartDate,
-                    proposedEndDate: quoteData.proposedEndDate,
-                    status: 'pending',
-                    createdAt: new Date(),
-                };
-                return { ...problem, quotes: [...problem.quotes, newQuote] };
+    const fetchMyQuotes = useCallback(async () => {
+        if (!userProfile || userRole !== 'provider') return;
+        setLoading(true);
+        try {
+            const data = await makeAuthenticatedRequest('/.netlify/functions/get-my-quotes', 'GET');
+            // This assumes get-my-quotes returns the necessary problemTitle/Status
+            setProblems(prev => { // Update quotes within the problems array to reflect changes
+                return prev.map(p => {
+                    const updatedQuotesForThisProblem = data.filter(q => q.problem_id === p.id);
+                    return { ...p, quotes: updatedQuotesForThisProblem };
+                });
+            });
+            // You might want a dedicated `myQuotes` state if the data structure is complex
+        } catch (error) {
+            console.error('Error fetching my quotes:', error);
+        } finally {
+            setLoading(false);
+        }
+    }, [userProfile, userRole, makeAuthenticatedRequest]); // Depend on userProfile, userRole, makeAuthenticatedRequest
+
+    const handleSubmitQuote = async (problemId, quoteData) => {
+        if (!userProfile || userRole !== 'provider' || !userProfile.is_provider_approved) {
+            setMessage({ type: 'error', text: 'Only approved providers can submit quotes.' });
+            return;
+        }
+        try {
+            await makeAuthenticatedRequest('/.netlify/functions/submit-quote', 'POST', {
+                problemId,
+                amount: quoteData.proposedBudget,
+                details: quoteData.motivation,
+                proposedStartDate: quoteData.proposedStartDate,
+                proposedEndDate: quoteData.proposedEndDate,
+            });
+            setMessage({ type: 'success', text: 'Quote submitted successfully!' });
+            setSubmittingQuoteForProblem(null);
+            fetchPublicProblems(); // Refresh problems to see new quote count
+            fetchMyQuotes(); // Refresh my quotes
+        } catch (error) {
+            // Error handled by makeAuthenticatedRequest
+        }
+    };
+
+    const handleAcceptQuote = async (problemId, quoteId) => {
+        triggerConfirmation("By accepting this quote, your contact information (name, email, phone) will be shared with the selected provider. Do you wish to proceed?", async () => {
+            if (!userProfile || userProfile.id !== problems.find(p => p.id === problemId)?.requester_id) {
+                setMessage({ type: 'error', text: 'You are not authorized to accept this quote.' });
+                return;
             }
-            return problem;
-        }));
-        setMessage({ type: 'success', text: 'Quote submitted successfully (mock)!' });
-        setSubmittingQuoteForProblem(null);
-    };
-
-    const handleAcceptQuote = (problemId, quoteId) => {
-        setConfirmationMessage("By accepting this quote, your contact information (name, email, phone) will be shared with the selected provider. Do you wish to proceed?");
-        setConfirmationAction(() => () => {
-            // API call to update quote/problem status in Neon DB
-            setMockProblems(prevProblems => prevProblems.map(problem => {
-                if (problem.id === problemId) {
-                    return {
-                        ...problem,
-                        status: 'closed',
-                        acceptedQuoteId: quoteId,
-                        quotes: problem.quotes.map(quote =>
-                            quote.id === quoteId ? { ...quote, status: 'accepted' } : { ...quote, status: 'rejected' }
-                        )
-                    };
-                }
-                return problem;
-            }));
-            setMessage({ type: 'success', text: 'Quote accepted! Problem marked as closed (mock).' });
-            setShowConfirmationModal(false);
-        });
-        setShowConfirmationModal(true);
-    };
-
-    const handleWithdrawQuote = (problemId, quoteId) => {
-        setConfirmationMessage('Are you sure you want to withdraw this quote?');
-        setConfirmationAction(() => () => {
-            // API call to delete quote from Neon DB
-            setMockProblems(prevProblems => prevProblems.map(problem => {
-                if (problem.id === problemId) {
-                    return { ...problem, quotes: problem.quotes.filter(q => q.id !== quoteId) };
-                }
-                return problem;
-            }));
-            setMessage({ type: 'success', text: 'Quote withdrawn successfully (mock).' });
-            setShowConfirmationModal(false);
-        });
-        setShowConfirmationModal(true);
-    };
-
-    const handleEditQuote = (problemId, quoteId, updatedQuoteData) => {
-        // API call to update quote in Neon DB
-        setMockProblems(prevProblems => prevProblems.map(problem => {
-            if (problem.id === problemId) {
-                return {
-                    ...problem,
-                    quotes: problem.quotes.map(quote =>
-                        quote.id === quoteId ? { ...quote, ...updatedQuoteData } : quote
-                    )
-                };
+            if (!isPaidMember) {
+                setMessage({ type: 'error', text: 'You must be a paid member to accept quotes.' });
+                return;
             }
-            return problem;
-        }));
-        setMessage({ type: 'success', text: 'Quote updated successfully (mock).' });
-        setEditingQuote(null);
+            try {
+                await makeAuthenticatedRequest('/.netlify/functions/accept-quote', 'PUT', { problemId, quoteId });
+                setMessage({ type: 'success', text: 'Quote accepted! Problem marked as closed.' });
+                fetchPublicProblems(); // Refresh problem status
+                fetchMyProblems(); // Refresh my requests
+                fetchMyQuotes(); // Refresh provider's quotes if they are also provider
+                setShowConfirmationModal(false);
+            } catch (error) {
+                // Error handled by makeAuthenticatedRequest
+            }
+        });
+    };
+
+    const handleWithdrawQuote = async (problemId, quoteId) => {
+        triggerConfirmation('Are you sure you want to withdraw this quote?', async () => {
+            try {
+                await makeAuthenticatedRequest('/.netlify/functions/withdraw-quote', 'DELETE', { quoteId });
+                setMessage({ type: 'success', text: 'Quote withdrawn successfully.' });
+                fetchMyQuotes(); // Refresh my quotes list
+                fetchPublicProblems(); // Update problem's quotes list
+                setShowConfirmationModal(false);
+            } catch (error) {
+                // Error handled by makeAuthenticatedRequest
+            }
+        });
+    };
+
+    const handleEditQuote = async (problemId, quoteId, updatedQuoteData) => {
+        try {
+            await makeAuthenticatedRequest('/.netlify/functions/update-quote', 'PUT', { quoteId, problemId, ...updatedQuoteData });
+            setMessage({ type: 'success', text: 'Quote updated successfully!' });
+            setEditingQuote(null);
+            fetchMyQuotes(); // Refresh my quotes
+            fetchPublicProblems(); // Refresh public problems
+        } catch (error) {
+            // Error handled by makeAuthenticatedRequest
+        }
     };
 
 
     // --- General Authentication/Registration Handlers ---
-    const handleRegister = (newUserData, roleType, isPaid = false) => {
-        // This will be replaced by Auth0 registration and then saving to Neon DB
-        const newUid = crypto.randomUUID();
-        const newUserProfile = {
-            uid: newUid,
-            name: newUserData.name,
-            email: newUserData.email,
-            phone: newUserData.phone,
-            role: roleType,
-            isProviderApproved: roleType === 'provider' ? false : undefined,
-            isPaidMember: isPaid,
-            bio: newUserData.bio || '',
-            address: newUserData.address || '',
-            companyName: newUserData.companyName || undefined,
-            specialties: newUserData.specialties || undefined,
-        };
 
-        setMockUserProfiles(prev => ({
-            ...prev,
-            [newUid]: newUserProfile
-        }));
-        setUserId(newUid);
-        setUserProfileState(newUserProfile);
-        setUserRole(newUserProfile.role);
-        setIsPaidMember(newUserProfile.isPaidMember);
-        setMessage({ type: 'success', text: `Welcome, ${newUserData.name}! You are now registered as a ${roleType} (mock).` });
-        setCurrentPage('dashboard');
-        setShowRegisterModal(false);
+    // Registration now handled by Auth0 setup, then get-or-create-user-profile
+    // The previous handleRegister mock function will be largely replaced.
+    // Frontend's 'Register / Sign Up' button will typically initiate Auth0 login/signup flow.
+    const handleRegisterOrLogin = () => {
+        loginWithRedirect(); // Initiates Auth0 universal login/signup page
     };
 
-    const handleBecomePaidMember = (newUserData, selectedPlanDetails) => {
-        // This will trigger Paystack payment and rely on webhook for DB update
-        let existingUser = mockUserProfiles[userId];
-        const newUid = userRole === 'loggedOut' ? crypto.randomUUID() : userId;
-
-        const updatedProfile = {
-            ...existingUser,
-            uid: newUid,
-            name: newUserData.name || existingUser?.name || `New Member ${newUid.substring(0,4)}`,
-            email: newUserData.email || existingUser?.email || `newmember-${newUid.substring(0,4)}@example.com`,
-            phone: newUserData.phone || existingUser?.phone || '',
-            role: 'member',
-            isPaidMember: true,
-            bio: newUserData.bio || existingUser?.bio || '',
-            address: newUserData.address || existingUser?.address || '',
-            companyName: undefined,
-            specialties: undefined,
-            isProviderApproved: undefined,
-        };
-        setMockUserProfiles(prev => ({
-            ...prev,
-            [newUid]: updatedProfile
-        }));
-        setUserId(newUid);
-        setUserProfileState(updatedProfile);
-        setUserRole('member');
-        setIsPaidMember(true);
-        setSelectedPlan(null);
-        setMessage({ type: 'success', text: `Congratulations! You are now a Paid Member (${selectedPlanDetails.name}) (mock).` });
-        setCurrentPage('problems');
+    // The 'handleLoginAs' (mock login) will be removed as Auth0 handles real logins.
+    // The logout will use Auth0's logout function.
+    const handleLogout = () => {
+        logout({ logoutParams: { returnTo: window.location.origin } });
+        setMessage({ type: 'info', text: 'You have been logged out.' });
+        // Clean up local states after logout
+        setUserProfile(null);
+        setUserRole('loggedOut');
+        setIsPaidMember(false);
+        setProblems([]); // Clear problems data as user-specific data might be mixed
+        setAllUsers([]);
+        setPricingPlans([]); // Will re-fetch public ones later
+        setCurrentPage('problems'); // Redirect to a public page
     };
 
-    // This mock login will be removed for production Auth0 login
-    const handleLoginAs = (targetUid) => {
-        let newUserId;
-        let newProfile;
-        if (targetUid === 'loggedOut') {
-            newUserId = crypto.randomUUID();
-            newProfile = {
-                uid: '',
-                name: 'Guest User',
-                email: '',
-                phone: '',
-                role: 'loggedOut',
-                isProviderApproved: false,
-                isPaidMember: false,
-                bio: '',
-                address: ''
-            };
-        } else {
-            newUserId = targetUid;
-            newProfile = mockUserProfiles[targetUid];
+
+    // handleBecomePaidMember will trigger Paystack payment then webhook will update DB
+    const handleBecomePaidMember = async (planDetails) => {
+        if (!userProfile) {
+            setMessage({ type: 'error', text: 'Please log in to become a paid member.' });
+            return;
         }
-        setUserId(newUserId);
-        setUserProfileState(newProfile);
-        setUserRole(newProfile.role);
-        setIsPaidMember(newProfile.isPaidMember || false);
-        setCurrentPage('dashboard');
-        setMessage({ type: '', text: '' });
+
+        // Simulate opening Paystack payment link
+        if (planDetails.plan_code) { // Use snake_case for plan_code
+            // For production, you'd use Paystack's Checkout method via their JS SDK or initiate from backend
+            // For now, let's just open the link (which isn't ideal for production but demonstrates the flow)
+            // In a real app, this would involve a backend call to initiate a transaction and return a checkout URL
+            // OR use a React Paystack hook/component with `config` object
+            const paystackPaymentLink = `https://paystack.com/pay/${planDetails.plan_code}`;
+            window.open(paystackPaymentLink, '_blank');
+            setMessage({type: 'info', text: 'Redirecting to Paystack for payment. Your membership will be updated upon successful payment confirmation!'});
+            setSelectedPlan(null); // Close the payment modal/dialog
+        } else {
+            setMessage({ type: 'error', text: 'This plan does not have a direct payment link. Please contact support.' });
+        }
     };
 
     // --- Branding Management (manage:branding) ---
-    const handleUpdateBranding = (newName, newLogo) => {
-        // API call to update branding in Neon DB
-        setAppName(newName);
-        setAppLogo(newLogo);
-        setMessage({ type: 'success', text: 'Branding updated successfully (mock).' });
+    const handleUpdateBranding = async (newName, newLogo) => {
+        try {
+            await makeAuthenticatedRequest('/.netlify/functions/save-branding', 'PUT', { app_name: newName, app_logo_url: newLogo });
+            setAppName(newName);
+            setAppLogo(newLogo);
+            setMessage({ type: 'success', text: 'Branding updated successfully!' });
+        } catch (error) {
+            // Error handled by makeAuthenticatedRequest
+        }
     };
 
     // --- Pricing Plan Management (manage:pricing_plans) ---
-    const handleSavePricingPlan = (plan) => {
-        // API call to save/update pricing plan in Neon DB
-        setMockPricingPlans(prev => {
-            if (plan.id) {
-                return prev.map(p => p.id === plan.id ? plan : p);
-            } else {
-                return [...prev, { ...plan, id: crypto.randomUUID() }];
+    const handleSavePricingPlan = async (planData) => {
+        try {
+            const method = planData.id ? 'PUT' : 'POST'; // If planData has an ID, it's an update
+            const endpoint = '/.netlify/functions/save-pricing-plan';
+            await makeAuthenticatedRequest(endpoint, method, planData);
+            setMessage({ type: 'success', text: planData.id ? `Plan "${planData.name}" updated successfully!` : `New plan "${planData.name}" added successfully!` });
+            setCurrentEditingPlan(null); // Close edit modal
+            // Re-fetch pricing plans after saving/updating
+            const response = await fetch('/.netlify/functions/get-pricing-plans');
+            if (response.ok) {
+                const data = await response.json();
+                setPricingPlans(data);
             }
-        });
-        setMessage({ type: 'success', text: 'Pricing plan saved successfully (mock).' });
+        } catch (error) {
+            // Error handled by makeAuthenticatedRequest
+        }
     };
 
     const handleDeletePricingPlan = (planId, planName) => {
-        setConfirmationMessage(`Are you sure you want to delete the plan "${planName}"? This action cannot be undone.`);
-        setConfirmationAction(() => () => {
-            // API call to delete pricing plan from Neon DB
-            setMockPricingPlans(prev => prev.filter(p => p.id !== planId));
-            setMessage({ type: 'success', text: `Plan "${planName}" deleted (mock).` });
-            setShowConfirmationModal(false);
+        triggerConfirmation(`Are you sure you want to delete the plan "${planName}"? This action cannot be undone.`, async () => {
+            try {
+                await makeAuthenticatedRequest('/.netlify/functions/delete-pricing-plan', 'DELETE', { id: planId });
+                setMessage({ type: 'success', text: `Plan "${planName}" deleted.` });
+                // Re-fetch pricing plans after deletion
+                const response = await fetch('/.netlify/functions/get-pricing-plans');
+                if (response.ok) {
+                    const data = await response.json();
+                    setPricingPlans(data);
+                }
+                setShowConfirmationModal(false);
+            } catch (error) {
+                // Error handled by makeAuthenticatedRequest
+            }
         });
+    };
+
+    // --- Admin Approvals ---
+    const fetchAllUsers = useCallback(async () => {
+        if (userRole !== 'admin') return;
+        setLoading(true);
+        try {
+            const data = await makeAuthenticatedRequest('/.netlify/functions/get-all-users', 'GET');
+            setAllUsers(data);
+        } catch (error) {
+            console.error('Error fetching all users:', error);
+        } finally {
+            setLoading(false);
+        }
+    }, [userRole, makeAuthenticatedRequest]); // Depend on userRole and makeAuthenticatedRequest
+
+    const handleApproveProvider = async (providerId, isApproved) => {
+        try {
+            await makeAuthenticatedRequest('/.netlify/functions/approve-provider', 'PUT', { providerId, isApproved });
+            setMessage({ type: 'success', text: `Provider status updated for ${allUsers.find(u => u.id === providerId)?.name || 'user'}.` });
+            fetchAllUsers(); // Refresh user list
+        } catch (error) {
+            // Error handled by makeAuthenticatedRequest
+        }
+    };
+
+    const handleDeleteUser = (userIdToDelete) => { // Renamed from handleDeleteProvider to be more general
+        triggerConfirmation("Are you sure you want to delete this user? This will remove their profile and cannot be undone.", async () => {
+            try {
+                await makeAuthenticatedRequest('/.netlify/functions/delete-user', 'DELETE', { userIdToDelete }); // Call the new delete-user function
+                setMessage({ type: 'success', text: `User ${allUsers.find(u => u.id === userIdToDelete)?.name || 'user'} deleted.` });
+                fetchAllUsers(); // Refresh list
+                setShowConfirmationModal(false);
+            } catch (error) {
+                // Error handled by makeAuthenticatedRequest
+            }
+        });
+    };
+
+    const triggerConfirmation = (message, action) => {
+        setConfirmationMessage(message);
+        setConfirmationAction(() => action);
         setShowConfirmationModal(true);
     };
-
-    const handleApproveProvider = (providerId) => {
-        // API call to update provider status in Neon DB
-        setMockUserProfiles(prevProfiles => ({
-            ...prevProfiles,
-            [providerId]: { ...prevProfiles[providerId], isProviderApproved: true }
-        }));
-        setMessage({ type: 'success', text: `Provider ${mockUserProfiles[providerId]?.name} approved (mock).` });
-    };
-
-    const handleDeleteProvider = (providerId) => {
-        setConfirmationMessage("Are you sure you want to delete this provider? This will remove their profile.");
-        setConfirmationAction(() => () => {
-            // API call to delete provider from Neon DB
-            setMockUserProfiles(prevProfiles => {
-                const newProfiles = { ...prevProfiles };
-                delete newProfiles[providerId];
-                return newProfiles;
-            });
-            setMessage({ type: 'success', text: `Provider ${mockUserProfiles[providerId]?.name} deleted (mock).` });
-            setShowConfirmationModal(false);
-        });
-        setShowConfirmationModal(true);
-    };
-
 
     // Determine the header title and status based on role
     const headerTitle = userProfile?.name || 'Guest';
@@ -545,26 +537,53 @@ const App = () => {
         statusText = 'Administrator';
         statusColorClass = 'bg-purple-100 text-purple-800';
     } else if (userRole === 'provider') {
-        statusText = userProfile?.isProviderApproved ? 'Approved Provider' : 'Pending Approval';
-        statusColorClass = userProfile?.isProviderApproved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+        statusText = userProfile?.is_provider_approved ? 'Approved Provider' : 'Pending Approval';
+        statusColorClass = userProfile?.is_provider_approved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
     } else { // member
         statusText = isPaidMember ? 'Paid Member' : 'Free Member';
         statusColorClass = isPaidMember ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800';
     }
 
+    // Provide context values for sub-components
+    const appContextValue = {
+        userId: userProfile?.id, // Use actual DB ID
+        userProfile,
+        userRole,
+        isPaidMember,
+        currentPage,
+        loading,
+        message,
+        appName,
+        appLogo,
+        problems, // Now real data
+        allUsers, // Now real data
+        pricingPlans, // Now real data
+        selectedPlan,
+        setCurrentPage, setLoading, setMessage,
+        setAppName, setAppLogo, setSelectedPlan,
+        // API action functions
+        fetchPublicProblems,
+        fetchMyProblems,
+        fetchMyQuotes,
+        fetchAllUsers,
+        handlePostProblem,
+        handleLogout, // Auth0 logout
+        handleRegisterOrLogin, // Auth0 login/signup redirect
+        handleBecomePaidMember,
+        setShowPostProblemModal, showPostProblemModal,
+        handleDeleteProblem, handleEditProblem, handleApproveProblem, handleMarkProblemResolved,
+        handleSubmitQuote, handleAcceptQuote, handleWithdrawQuote, handleEditQuote,
+        handleUpdateBranding, handleSavePricingPlan, handleDeletePricingPlan,
+        setShowBecomeProviderModal, handleDeleteUser, // Replaced handleDeleteProvider with handleDeleteUser
+        handleApproveProvider,
+        // Admin specific states/functions
+        setSubmittingQuoteForProblem, submittingQuoteForProblem,
+        setEditingQuote, editingQuote,
+        setCurrentEditingPlan, currentEditingPlan, setShowConfirmationModal
+    };
+
     return (
-        <AppContext.Provider value={{
-            userId, userProfile, userRole, isPaidMember, currentPage, loading, message, appName, appLogo,
-            mockProblems, mockUserProfiles, mockPricingPlans, selectedPlan,
-            setUserId, setUserProfileState, setUserRole, setIsPaidMember, setCurrentPage, setLoading, setMessage,
-            setAppName, setAppLogo, setMockProblems, setMockUserProfiles, setMockPricingPlans, setSelectedPlan,
-            handlePostProblem, handleRegister, handleBecomePaidMember, handleLoginAs, // handleLoginAs will eventually be removed
-            setShowPostProblemModal, showPostProblemModal, setShowRegisterModal, showRegisterModal,
-            handleDeleteProblem, handleEditProblem, handleApproveProblem, handleMarkProblemResolved,
-            handleSubmitQuote, handleAcceptQuote, handleWithdrawQuote, handleEditQuote,
-            handleUpdateBranding, handleSavePricingPlan, handleDeletePricingPlan,
-            setShowBecomeProviderModal, handleApproveProvider, handleDeleteProvider
-        }}>
+        <AppContext.Provider value={appContextValue}>
             <div className="flex h-screen bg-gray-100 font-sans">
                 {/* Mobile Menu Toggle Button */}
                 <div className="md:hidden fixed top-4 left-4 z-50">
@@ -582,32 +601,12 @@ const App = () => {
                     <div className="p-4 md:p-6 text-center border-b border-[#b3641a]">
                         <img src={appLogo} alt="App Logo" className="mx-auto mb-4 w-24 h-auto rounded-md" onError={(e) => { e.target.onerror = null; e.target.src="https://placehold.co/100x40/964b00/ffffff?text=Logo"; }}/>
                         <h2 className="text-2xl font-bold">{appName}</h2>
-                        <p className="text-sm text-gray-200 mt-1">ID: {userId || 'N/A'}</p>
+                        <p className="text-sm text-gray-200 mt-1">ID: {userProfile?.id || 'N/A'}</p>
                         {/* Conditional rendering for the "Switch User" dropdown based on enableDevFeatures */}
                         {enableDevFeatures && userRole !== 'loggedOut' && (
                             <div className="mt-4 flex flex-col space-y-2">
-                                <label className="text-sm text-gray-200">Switch User (Dev Only):</label>
-                                <select
-                                    onChange={(e) => handleLoginAs(e.target.value)}
-                                    value={userId}
-                                    className="p-2 rounded-md bg-[#7a3d00] text-white text-sm"
-                                >
-                                    <option value="loggedOut">Log Out / Guest</option>
-                                    <option value="mock-member-alice">Login as Alice (Paid Member)</option>
-                                    <option value="mock-member-bob">Login as Bob (Free Member)</option>
-                                    <option value="mock-provider-alpha">Login as Alpha (Approved Provider)</option>
-                                    <option value="mock-provider-charlie">Login as Charlie (Pending Provider)</option>
-                                    <option value="admin-user">Login as Admin</option>
-                                    {/* Dynamically add other mock users if they register */}
-                                    {Object.values(mockUserProfiles)
-                                        .filter(u => !['mock-member-alice', 'mock-member-bob', 'mock-provider-alpha', 'mock-provider-charlie', 'admin-user', ''].includes(u.uid))
-                                        .map(u => (
-                                            <option key={u.uid} value={u.uid}>
-                                                {u.name} ({u.role} - {u.isPaidMember ? 'Paid' : (u.isProviderApproved ? 'Approved' : 'Pending')})
-                                            </option>
-                                        ))
-                                    }
-                                </select>
+                                <label className="text-sm text-gray-200">User Role (Dev Only):</label>
+                                <span className="p-2 rounded-md bg-[#7a3d00] text-white text-sm capitalize">{userRole}</span>
                             </div>
                         )}
                     </div>
@@ -712,9 +711,9 @@ const App = () => {
                     </nav>
                     {/* This div contains the login/logout buttons and is outside of nav but inside aside */}
                     <div className="p-4 md:p-6 border-t border-[#b3641a]">
-                        {userRole !== 'loggedOut' ? (
+                        {isAuthenticated ? (
                             <button
-                                onClick={() => handleLoginAs('loggedOut')} // This will eventually be Auth0 logout
+                                onClick={handleLogout}
                                 className="flex items-center w-full px-4 py-3 text-lg text-red-300 rounded-md hover:bg-red-700 transition-colors duration-200"
                             >
                                 <LogOutIcon size={20} className="mr-3" /> Log Out
@@ -722,16 +721,10 @@ const App = () => {
                         ) : (
                             <div className="flex justify-center space-x-2">
                                 <button
-                                    onClick={() => {/* Implement Auth0 Login */ setMessage({type: 'info', text: 'Auth0 Login integration coming soon!'})}}
+                                    onClick={handleRegisterOrLogin} // This now triggers Auth0 login/signup
                                     className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200"
                                 >
-                                    Login
-                                </button>
-                                <button
-                                    onClick={() => setShowRegisterModal(true)}
-                                    className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200"
-                                >
-                                    Register / Sign Up
+                                    Login / Sign Up
                                 </button>
                             </div>
                         )}
@@ -757,7 +750,7 @@ const App = () => {
                     </header>
 
                     {/* Global Message Display */}
-                    {message.text && (
+                    {message && message.text && (
                         <div className={`p-3 text-white text-center ${message.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
                             {message.text}
                         </div>
@@ -765,38 +758,45 @@ const App = () => {
 
                     {/* Page Content based on currentPage state */}
                     <div className="flex-1 overflow-y-auto p-4 md:p-6">
-                        {(() => {
-                            switch (currentPage) {
-                                case 'dashboard':
-                                    return userRole === 'provider' ?
-                                        <ProviderDashboardPage userProfile={userProfile} onNavigate={setCurrentPage} /> :
-                                        <MemberDashboardPage userProfile={userProfile} onNavigate={setCurrentPage} />;
-                                case 'profile':
-                                    return <ProfilePage />;
-                                case 'problems':
-                                    return <ProblemListPage onNavigate={setCurrentPage} setShowPostProblemModal={setShowPostProblemModal} />;
-                                case 'my-quotes':
-                                    return userRole === 'provider' ? <MyQuotesPage /> : null;
-                                case 'my-requests':
-                                    return userRole === 'member' ? <MyRequestsPage /> : null;
-                                case 'admin-approvals':
-                                    return userRole === 'admin' ? <AdminToolsPage /> : null;
-                                case 'admin-pricing':
-                                    return userRole === 'admin' ? <AdminPricingPage /> : null;
-                                case 'admin-branding':
-                                    return userRole === 'admin' ? <AdminBrandingPage /> : null;
-                                case 'settings':
-                                    return userRole !== 'loggedOut' ? <SettingsPage /> : null;
-                                case 'pricing':
-                                    return <PricingPage />;
-                                case 'problem-detail':
-                                    const problemId = window.location.hash.split('/').pop();
-                                    const problem = mockProblems.find(p => p.id === problemId);
-                                    return problem ? <ProblemDetailPage problem={problem} onNavigate={setCurrentPage} /> : <p className="text-red-500">Problem not found.</p>;
-                                default:
-                                    return <ProblemListPage onNavigate={setCurrentPage} setShowPostProblemModal={setShowPostProblemModal} />;
-                            }
-                        })()}
+                        {loading ? (
+                            <div className="flex justify-center items-center h-full">
+                                <p className="text-xl text-gray-600">Loading data...</p>
+                            </div>
+                        ) : (
+                            (() => {
+                                switch (currentPage) {
+                                    case 'dashboard':
+                                        return userRole === 'provider' ?
+                                            <ProviderDashboardPage /> :
+                                            <MemberDashboardPage />;
+                                    case 'profile':
+                                        return <ProfilePage />;
+                                    case 'problems':
+                                        return <ProblemListPage setShowPostProblemModal={setShowPostProblemModal} />;
+                                    case 'my-quotes':
+                                        return userRole === 'provider' ? <MyQuotesPage /> : null;
+                                    case 'my-requests':
+                                        return userRole === 'member' ? <MyRequestsPage /> : null;
+                                    case 'admin-approvals':
+                                        return userRole === 'admin' ? <AdminToolsPage /> : null;
+                                    case 'admin-pricing':
+                                        return userRole === 'admin' ? <AdminPricingPage /> : null;
+                                    case 'admin-branding':
+                                        return userRole === 'admin' ? <AdminBrandingPage /> : null;
+                                    case 'settings':
+                                        return userRole !== 'loggedOut' ? <SettingsPage /> : null;
+                                    case 'pricing':
+                                        return <PricingPage />;
+                                    case 'problem-detail':
+                                        // This will need to fetch problem details by ID directly or from state
+                                        const problemId = window.location.hash.split('/').pop();
+                                        const problemDetail = problems.find(p => p.id === problemId);
+                                        return problemDetail ? <ProblemDetailPage problem={problemDetail} /> : <p className="text-red-500">Problem not found.</p>;
+                                    default:
+                                        return <ProblemListPage setShowPostProblemModal={setShowPostProblemModal} />;
+                                }
+                            })()
+                        )}
                     </div>
                 </main>
 
@@ -805,7 +805,8 @@ const App = () => {
                     <PostProblemModal
                         onClose={() => setShowPostProblemModal(false)}
                         onSave={handlePostProblem}
-                        activeProblemsCount={mockProblems.filter(p => p.requesterId === userId && p.status === 'open').length}
+                        // activeProblemsCount will need to be fetched dynamically for real limits
+                        // For now, it will be handled by the backend function
                         isPaidMember={isPaidMember}
                     />
                 )}
@@ -818,8 +819,8 @@ const App = () => {
                         onAcceptQuote={handleAcceptQuote}
                         onDeleteProblem={handleDeleteProblem}
                         onMarkResolved={handleMarkProblemResolved}
-                        mockUserProfiles={mockUserProfiles}
-                        onNavigate={setCurrentPage} // Pass onNavigate for 'Back to Problems' button
+                        onApproveProblem={handleApproveProblem} // Make sure this is passed down
+                        // No mockUserProfiles needed here, use backend
                     />
                 )}
 
@@ -837,14 +838,7 @@ const App = () => {
                         quote={editingQuote}
                         onClose={() => setEditingQuote(null)}
                         onSave={handleEditQuote}
-                        problemTitle={mockProblems.find(p => p.id === editingQuote.problemId)?.title}
-                    />
-                )}
-
-                {showRegisterModal && (
-                    <RegistrationPage
-                        onClose={() => setShowRegisterModal(false)}
-                        onRegister={handleRegister}
+                        problemTitle={problems.find(p => p.id === editingQuote.problem_id)?.title}
                     />
                 )}
 
@@ -859,7 +853,26 @@ const App = () => {
                 {showBecomeProviderModal && (
                     <BecomeProviderModal
                         onClose={() => setShowBecomeProviderModal(false)}
-                        onRegister={handleRegister}
+                        // This will trigger an update to the user's role on the backend
+                        onRegister={async (formData) => {
+                             try {
+                                const updatedProfile = await makeAuthenticatedRequest('/.netlify/functions/update-user-profile', 'PUT', {
+                                    ...userProfile, // Keep existing profile data
+                                    role: 'provider',
+                                    is_provider_approved: false, // Set to false initially
+                                    company_name: formData.companyName, // Backend expects snake_case
+                                    specialties: formData.specialties,
+                                    bio: formData.bio
+                                });
+                                setUserProfile(updatedProfile); // Update local state with new role/provider status
+                                setUserRole('provider');
+                                setMessage({ type: 'success', text: `You are now registered as a Provider! Awaiting admin approval.` });
+                                setShowBecomeProviderModal(false);
+                            } catch (error) {
+                                console.error('Error registering as provider:', error);
+                                setMessage({ type: 'error', text: `Failed to register as provider: ${error.message}` });
+                            }
+                        }}
                     />
                 )}
 
@@ -879,33 +892,40 @@ export default App;
 
 // =========================================================================
 // SUB-COMPONENTS DEFINED BELOW MAIN APP COMPONENT
+// They now consume context and use backend data/handlers
 // =========================================================================
 
 
 // --- Dashboard Components ---
 
-const ProviderDashboardPage = ({ userProfile, onNavigate }) => {
-    const { userId, mockProblems } = useContext(AppContext);
+const ProviderDashboardPage = () => {
+    const { userId, problems, fetchMyQuotes, userProfile, setCurrentPage } = useContext(AppContext);
     const [totalQuotes, setTotalQuotes] = useState(0);
     const [pendingQuotes, setPendingQuotes] = useState(0);
+    const [myProviderQuotes, setMyProviderQuotes] = useState([]);
+
 
     useEffect(() => {
+        // Fetch quotes when component mounts or dependencies change
+        fetchMyQuotes();
+    }, [fetchMyQuotes]); // Dependency on fetchMyQuotes from context
+
+    useEffect(() => {
+        // Filter and count quotes from the global 'problems' state
         let providerQuotes = [];
-        mockProblems.forEach(problem => {
-            problem.quotes.forEach(quote => {
-                if (quote.providerId === userId) {
-                    providerQuotes.push({ ...quote, problemTitle: problem.title });
+        problems.forEach(problem => {
+            problem.quotes?.forEach(quote => { // Use optional chaining for quotes array
+                if (quote.provider_id === userId) { // Use snake_case for DB fields
+                    providerQuotes.push({ ...quote, problemTitle: problem.title, problemStatus: problem.status });
                 }
             });
         });
+        setMyProviderQuotes(providerQuotes);
         setTotalQuotes(providerQuotes.length);
         setPendingQuotes(providerQuotes.filter(quote => quote.status === 'pending').length);
-    }, [mockProblems, userId]);
+    }, [problems, userId]); // Re-run when problems data changes
 
-    const sortedMyQuotes = [...mockProblems.flatMap(problem =>
-        problem.quotes.filter(quote => quote.providerId === userId)
-            .map(quote => ({ ...quote, problemTitle: problem.title, problemStatus: problem.status }))
-    )].sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const sortedMyQuotes = [...myProviderQuotes].sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
 
     return (
@@ -918,10 +938,10 @@ const ProviderDashboardPage = ({ userProfile, onNavigate }) => {
                     <BriefcaseIcon className="text-[#964b00]" size={36} />
                     <div>
                         <h3 className="text-lg font-semibold text-gray-700">Provider Status</h3>
-                        <p className={`text-xl font-bold ${userProfile?.isProviderApproved ? 'text-green-600' : 'text-red-600'}`}>
-                            {userProfile?.isProviderApproved ? 'Approved' : 'Pending Approval'}
+                        <p className={`text-xl font-bold ${userProfile?.is_provider_approved ? 'text-green-600' : 'text-red-600'}`}>
+                            {userProfile?.is_provider_approved ? 'Approved' : 'Pending Approval'}
                         </p>
-                        {!userProfile?.isProviderApproved && (
+                        {!userProfile?.is_provider_approved && (
                             <p className="text-sm text-gray-500 mt-1">Your application is under review.</p>
                         )}
                     </div>
@@ -937,7 +957,7 @@ const ProviderDashboardPage = ({ userProfile, onNavigate }) => {
                         </p>
                         <p className="text-sm text-gray-500 mt-1">{pendingQuotes} pending review</p>
                         <button
-                            onClick={() => onNavigate('my-quotes')}
+                            onClick={() => setCurrentPage('my-quotes')}
                             className="text-sm text-blue-500 hover:underline mt-1"
                         >
                             View My Quotes
@@ -950,14 +970,14 @@ const ProviderDashboardPage = ({ userProfile, onNavigate }) => {
                     <h3 className="text-lg font-semibold text-gray-700 mb-4">Quick Actions</h3>
                     <div className="space-y-3">
                         <button
-                            onClick={() => onNavigate('problems')}
+                            onClick={() => setCurrentPage('problems')}
                             className="flex items-center w-full px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 shadow-md"
                         >
                             <FileTextIcon size={20} className="mr-2" />
                             View Problem List
                         </button>
                         <button
-                            onClick={() => onNavigate('profile')}
+                            onClick={() => setCurrentPage('profile')}
                             className="flex items-center w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors duration-200 shadow-md"
                         >
                             <UserIcon size={20} className="mr-2" />
@@ -998,7 +1018,7 @@ const ProviderDashboardPage = ({ userProfile, onNavigate }) => {
                                                 {quote.status}
                                             </span>
                                         </td>
-                                        <td className="py-2 px-4">{quote.createdAt?.toLocaleDateString()}</td>
+                                        <td className="py-2 px-4">{new Date(quote.created_at)?.toLocaleDateString()}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -1006,7 +1026,7 @@ const ProviderDashboardPage = ({ userProfile, onNavigate }) => {
                     </div>
                 )}
                 <button
-                    onClick={() => onNavigate('my-quotes')}
+                    onClick={() => setCurrentPage('my-quotes')}
                     className="mt-4 px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
                 >
                     Go to My Quotes
@@ -1016,18 +1036,22 @@ const ProviderDashboardPage = ({ userProfile, onNavigate }) => {
     );
 };
 
-const MemberDashboardPage = ({ userProfile, onNavigate }) => {
-    const { isPaidMember, userId, mockProblems, setShowPostProblemModal, setShowBecomeProviderModal } = useContext(AppContext);
+const MemberDashboardPage = () => {
+    const { userProfile, isPaidMember, problems, setShowPostProblemModal, setShowBecomeProviderModal, setCurrentPage, fetchMyProblems } = useContext(AppContext);
     const [myProblemsCount, setMyProblemsCount] = useState(0);
     const [recentQuotes, setRecentQuotes] = useState([]);
 
     useEffect(() => {
-        let memberProblems = mockProblems.filter(p => p.requesterId === userId);
+        fetchMyProblems();
+    }, [fetchMyProblems]);
+
+    useEffect(() => {
+        const memberProblems = problems.filter(p => p.requester_id === userProfile?.id);
         setMyProblemsCount(memberProblems.length);
 
         let collectedRecentQuotes = [];
         memberProblems.forEach(problem => {
-            problem.quotes.forEach(quote => {
+            problem.quotes?.forEach(quote => {
                 collectedRecentQuotes.push({
                     ...quote,
                     problemTitle: problem.title,
@@ -1036,8 +1060,8 @@ const MemberDashboardPage = ({ userProfile, onNavigate }) => {
                 });
             });
         });
-        setRecentQuotes(collectedRecentQuotes.sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime()));
-    }, [mockProblems, userId]);
+        setRecentQuotes(collectedRecentQuotes.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+    }, [problems, userProfile]);
 
     return (
         <div className="space-y-8">
@@ -1068,7 +1092,7 @@ const MemberDashboardPage = ({ userProfile, onNavigate }) => {
                         </p>
                         <p className="text-sm text-gray-500 mt-1">{recentQuotes.length} quotes received</p>
                         <button
-                            onClick={() => onNavigate('my-requests')}
+                            onClick={() => setCurrentPage('my-requests')}
                             className="text-sm text-blue-500 hover:underline mt-1"
                         >
                             View My Requests
@@ -1081,13 +1105,13 @@ const MemberDashboardPage = ({ userProfile, onNavigate }) => {
                     <h3 className="text-lg font-semibold text-gray-700 mb-4">Quick Actions</h3>
                     <div className="space-y-3">
                         <button
-                            onClick={() => onNavigate('problems')}
+                            onClick={() => setCurrentPage('problems')}
                             className="flex items-center w-full px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 shadow-md"
                         >
                             <FileTextIcon size={20} className="mr-2" />
                             View Public Problems
                         </button>
-                        {userProfile.role === 'member' && (
+                        {userProfile?.role === 'member' && (
                             <button
                                 onClick={() => setShowPostProblemModal(true)}
                                 className="flex items-center w-full px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200 shadow-md"
@@ -1096,16 +1120,16 @@ const MemberDashboardPage = ({ userProfile, onNavigate }) => {
                                 Post New Problem
                             </button>
                         )}
-                        {!isPaidMember && userProfile.role === 'member' && (
+                        {!isPaidMember && userProfile?.role === 'member' && (
                              <button
-                                onClick={() => onNavigate('pricing')}
+                                onClick={() => setCurrentPage('pricing')}
                                 className="flex items-center w-full px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 shadow-md"
                             >
                                 <DollarSignIcon size={20} className="mr-2" />
                                 Become a Paid Member
                             </button>
                         )}
-                        {userProfile.role === 'member' && !userProfile.isProviderApproved && (
+                        {userProfile?.role === 'member' && !userProfile?.is_provider_approved && (
                              <button
                                 onClick={() => setShowBecomeProviderModal(true)}
                                 className="flex items-center w-full px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 transition-colors duration-200 shadow-md"
@@ -1115,7 +1139,7 @@ const MemberDashboardPage = ({ userProfile, onNavigate }) => {
                             </button>
                         )}
                         <button
-                            onClick={() => onNavigate('profile')}
+                            onClick={() => setCurrentPage('profile')}
                             className="flex items-center w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors duration-200 shadow-md"
                         >
                             <UserIcon size={20} className="mr-2" />
@@ -1130,7 +1154,7 @@ const MemberDashboardPage = ({ userProfile, onNavigate }) => {
                 <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
                     <PackageIcon size={24} className="mr-2 text-[#964b00]" /> Recent Quotes on My Problems
                 </h3>
-                {recentQuotes.length === 0 || userProfile.role === 'loggedOut' ? (
+                {recentQuotes.length === 0 || userProfile?.role === 'loggedOut' ? (
                     <p className="text-gray-600">No recent quotes received for your problems.</p>
                 ) : (
                     <div className="overflow-x-auto">
@@ -1157,7 +1181,7 @@ const MemberDashboardPage = ({ userProfile, onNavigate }) => {
                                                 {quote.status}
                                             </span>
                                         </td>
-                                        <td className="py-2 px-4">{quote.createdAt?.toLocaleDateString()}</td>
+                                        <td className="py-2 px-4">{new Date(quote.created_at)?.toLocaleDateString()}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -1165,7 +1189,7 @@ const MemberDashboardPage = ({ userProfile, onNavigate }) => {
                     </div>
                 )}
                 <button
-                    onClick={() => onNavigate('my-requests')}
+                    onClick={() => setCurrentPage('my-requests')}
                     className="mt-4 px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
                 >
                     Go to My Requests
@@ -1177,138 +1201,45 @@ const MemberDashboardPage = ({ userProfile, onNavigate }) => {
 
 // --- General Pages ---
 
-const RegistrationPage = ({ onClose, onRegister }) => {
-    const { setMessage } = useContext(AppContext);
-    const [name, setName] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [phone, setPhone] = useState('');
-    const [address, setAddress] = useState('');
-    const [role, setRole] = useState('member');
-    const [companyName, setCompanyName] = useState('');
-    const [specialties, setSpecialties] = useState('');
-    const [bio, setBio] = useState('');
-    const [formError, setFormError] = useState('');
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        setFormError('');
-
-        if (!name || !email || !password || !role) {
-            setFormError('Name, Email, Password, and Role are required.');
-            return;
-        }
-        if (!/\S+@\S+\.\S+/.test(email)) {
-            setFormError('Please enter a valid email address.');
-            return;
-        }
-        if (password.length < 6) {
-            setFormError('Password must be at least 6 characters long.');
-            return;
-        }
-
-        if (role === 'provider' && (!companyName || !specialties)) {
-            setFormError('For providers, Company Name and Specialties are required.');
-            return;
-        }
-
-        onRegister({ name, email, password, phone, address, companyName, specialties, bio }, role, false);
-        setMessage({type: 'success', text: `Registration successful! Welcome, ${name}.`});
-        onClose();
-    };
-
-    return (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">Register a New Account</h3>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regName">Full Name</label>
-                        <input type="text" id="regName" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={name} onChange={(e) => setName(e.target.value)} required />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regEmail">Email</label>
-                        <input type="email" id="regEmail" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={email} onChange={(e) => setEmail(e.target.value)} required />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regPassword">Password</label>
-                        <input type="password" id="regPassword" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={password} onChange={(e) => setPassword(e.target.value)} required />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regPhone">Phone (Optional)</label>
-                        <input type="tel" id="regPhone" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={phone} onChange={(e) => setPhone(e.target.value)} />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regAddress">Address (Optional)</label>
-                        <textarea id="regAddress" rows="2" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={address} onChange={(e) => setAddress(e.target.value)}></textarea>
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regRole">Register as:</label>
-                        <select id="regRole" className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={role} onChange={(e) => setRole(e.target.value)} required>
-                            <option value="member">Member</option>
-                            <option value="provider">Provider</option>
-                        </select>
-                    </div>
-                    {role === 'provider' && (
-                        <>
-                            <div>
-                                <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="companyName">Company Name</label>
-                                <input type="text" id="companyName" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={companyName} onChange={(e) => setCompanyName(e.target.value)} required={role === 'provider'} />
-                            </div>
-                            <div>
-                                <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="specialties">Specialties (e.g., Plumbing, Electrical)</label>
-                                <input type="text" id="specialties" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={specialties} onChange={(e) => setSpecialties(e.target.value)} required={role === 'provider'} />
-                            </div>
-                        </>
-                    )}
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="regBio">Bio (Optional)</label>
-                        <textarea id="regBio" rows="3" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={bio} onChange={(e) => setBio(e.target.value)}></textarea>
-                    </div>
-
-                    {formError && (<p className="text-red-500 text-sm">{formError}</p>)}
-
-                    <div className="flex justify-end space-x-4 mt-6">
-                        <button type="button" onClick={onClose} className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">Cancel</button>
-                        <button type="submit" className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200">Register</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
+// RegistrationPage - This component's direct registration logic will largely be removed
+// as Auth0 handles the primary registration flow. This component might become
+// an onboarding form after Auth0 registration if more details are needed immediately.
+// Removed this component entirely as it's not currently used and causes unused variable warnings.
 
 const BecomeProviderModal = ({ onClose, onRegister }) => {
     const { userProfile, setMessage } = useContext(AppContext);
-    const [companyName, setCompanyName] = useState(userProfile.companyName || '');
-    const [specialties, setSpecialties] = useState(userProfile.specialties || '');
-    const [bio, setBio] = useState(userProfile.bio || '');
+    const [companyName, setCompanyName] = useState(userProfile?.company_name || ''); // Use snake_case
+    const [specialties, setSpecialties] = useState(userProfile?.specialties || '');
+    const [bio, setBio] = useState(userProfile?.bio || '');
     const [formError, setFormError] = useState('');
 
-    const handleSubmit = (e) => {
+    useEffect(() => {
+        if (userProfile) {
+            setCompanyName(userProfile.company_name || '');
+            setSpecialties(userProfile.specialties || '');
+            setBio(userProfile.bio || '');
+        }
+    }, [userProfile]);
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setFormError('');
+        setMessage(null);
 
         if (!companyName || !specialties) {
             setFormError('Company Name and Specialties are required.');
             return;
         }
 
-        const updatedUserData = {
-            ...userProfile,
-            companyName,
-            specialties,
-            bio: bio || userProfile.bio,
-        };
-
-        onRegister(updatedUserData, 'provider', userProfile.isPaidMember);
-        setMessage({type: 'success', text: `You are now registered as a Provider! Awaiting admin approval (mock).`});
+        // Call the parent's onRegister which is now the App's handleBecomeProvider function
+        // It directly makes the API call to update the user profile
+        await onRegister({ companyName, specialties, bio });
         onClose();
     };
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md">
                 <h3 className="text-2xl font-bold text-gray-800 mb-6">Register as a Provider</h3>
                 <p className="text-gray-700 mb-4">Your current member details will be used. Please provide additional provider-specific information.</p>
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -1338,7 +1269,7 @@ const BecomeProviderModal = ({ onClose, onRegister }) => {
 };
 
 const PricingPage = () => {
-    const { setSelectedPlan, setMessage, mockPricingPlans } = useContext(AppContext);
+    const { setSelectedPlan, setMessage, pricingPlans } = useContext(AppContext); // Use real pricingPlans
 
     const handleSelectPlan = (plan) => {
         if (plan.interval === 'custom') {
@@ -1355,17 +1286,17 @@ const PricingPage = () => {
             <p className="text-center text-gray-600 mb-8">Choose the plan that best suits your needs.</p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {mockPricingPlans.length === 0 ? (
-                    <p className="text-gray-600 col-span-full text-center">No pricing plans available. Please check back later. (Admin can add them)</p>
+                {pricingPlans.length === 0 ? (
+                    <p className="text-gray-600 col-span-full text-center">No pricing plans available. Please check back later.</p>
                 ) : (
-                    mockPricingPlans.map(plan => (
+                    pricingPlans.map(plan => (
                         <div key={plan.id} className="border border-gray-200 rounded-lg p-6 flex flex-col items-center text-center shadow-md hover:shadow-lg transition-shadow duration-300">
                             <h3 className="text-2xl font-bold text-[#964b00] mb-2">{plan.name}</h3>
-                            <p className="text-4xl font-extrabold text-gray-900 mb-4">{plan.price}</p>
+                            <p className="text-4xl font-extrabold text-gray-900 mb-4">{plan.price_display}</p> {/* Use price_display */}
                             <ul className="text-gray-700 space-y-2 mb-6 text-left w-full">
                                 {plan.features.map((feature, index) => (
                                     <li key={index} className="flex items-center">
-                                        <CheckCircle2Icon size={18} className="text-green-500 mr-2" />
+                                        <CheckCircle2Icon size={18} className="mr-2 text-green-500" />
                                         {feature}
                                     </li>
                                 ))}
@@ -1391,7 +1322,7 @@ const SignUpFormModal = ({ plan, onClose, onCompleteSignUp }) => {
     const { userProfile, setMessage } = useContext(AppContext);
     const [name, setName] = useState(userProfile?.name || '');
     const [email, setEmail] = useState(userProfile?.email || '');
-    const [password, setPassword] = useState('');
+    // No password input needed here, as Auth0 handles initial signup/login credentials
     const [phone, setPhone] = useState(userProfile?.phone || '');
     const [address, setAddress] = useState(userProfile?.address || '');
     const [formError, setFormError] = useState('');
@@ -1405,38 +1336,38 @@ const SignUpFormModal = ({ plan, onClose, onCompleteSignUp }) => {
         }
     }, [userProfile]);
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setFormError('');
+        setMessage(null);
 
-        if (!name || !email || !password) {
-            setFormError('Name, Email, and Password are required.');
+        // Only update profile information here. Payment is external via Paystack redirect.
+        if (!name || !email) {
+            setFormError('Name and Email are required.');
             return;
         }
         if (!/\S+@\S+\.\S+/.test(email)) {
             setFormError('Please enter a valid email address.');
             return;
         }
-        if (password.length < 6) {
-            setFormError('Password must be at least 6 characters long.');
-            return;
+
+        // Update user's profile with potentially new contact info before payment if needed
+        // This is a profile update, not a full registration
+        try {
+            await onCompleteSignUp(plan); // Pass plan directly to the parent handler
+            // The actual user profile update for `is_paid_member` will happen via the Paystack webhook
+            // after successful payment.
+            onClose();
+        } catch (error) {
+            setFormError(`Failed to initiate payment: ${error.message}`);
         }
-
-        // Open Paystack payment link
-        const paystackPaymentLink = `https://paystack.com/pay/${plan.planCode || 'default_plan_code'}`;
-        window.open(paystackPaymentLink, '_blank');
-
-        // This will now rely on Paystack webhook to update the user status
-        onCompleteSignUp({ name, email, password, phone, address }, plan);
-        onClose();
-        setMessage({type: 'info', text: 'Redirecting to Paystack. Your membership will be updated upon successful payment confirmation!'});
     };
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md">
                 <h3 className="text-2xl font-bold text-gray-800 mb-6">Sign Up for {plan.name} Plan</h3>
-                <p className="text-gray-700 mb-4">Complete your details to proceed to payment.</p>
+                <p className="text-gray-700 mb-4">Confirm your details to proceed to payment.</p>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupName">Full Name</label>
@@ -1445,10 +1376,6 @@ const SignUpFormModal = ({ plan, onClose, onCompleteSignUp }) => {
                     <div>
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupEmail">Email</label>
                         <input type="email" id="signupEmail" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={email} onChange={(e) => setEmail(e.target.value)} required />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupPassword">Password</label>
-                        <input type="password" id="signupPassword" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={password} onChange={(e) => setPassword(e.target.value)} required />
                     </div>
                      <div>
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="signupPhone">Phone (Optional)</label>
@@ -1463,9 +1390,8 @@ const SignUpFormModal = ({ plan, onClose, onCompleteSignUp }) => {
 
                     <div className="flex flex-col space-y-3 mt-6">
                         <button type="submit" className="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200">
-                            Proceed to Payment ({plan.price})
+                            Proceed to Payment ({plan.price_display})
                         </button>
-                        {/* Removed the "Simulate Payment Success" button */}
                         <button type="button" onClick={onClose} className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">
                             Cancel
                         </button>
@@ -1477,10 +1403,10 @@ const SignUpFormModal = ({ plan, onClose, onCompleteSignUp }) => {
 };
 
 const ProfilePage = () => {
-    const { userProfile, setUserProfileState, mockUserProfiles, setMockUserProfiles, setMessage } = useContext(AppContext);
+    const { userProfile, setUserProfile, setMessage, makeAuthenticatedRequest } = useContext(AppContext);
     const [editMode, setEditMode] = useState(false);
     const [formData, setFormData] = useState({
-        name: '', email: '', phone: '', bio: '', address: '', companyName: '', specialties: '',
+        name: '', email: '', phone: '', bio: '', address: '', company_name: '', specialties: '', // Use snake_case
     });
 
     useEffect(() => {
@@ -1488,7 +1414,7 @@ const ProfilePage = () => {
             setFormData({
                 name: userProfile.name || '', email: userProfile.email || '', phone: userProfile.phone || '',
                 bio: userProfile.bio || '', address: userProfile.address || '',
-                companyName: userProfile.companyName || '', specialties: userProfile.specialties || '',
+                company_name: userProfile.company_name || '', specialties: userProfile.specialties || '',
             });
         }
     }, [userProfile]);
@@ -1498,16 +1424,15 @@ const ProfilePage = () => {
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleSave = () => {
-        // API call to update user profile in Neon DB
-        const updatedProfile = { ...userProfile, ...formData };
-        setUserProfileState(updatedProfile);
-        setMockUserProfiles(prev => ({
-            ...prev,
-            [userProfile.uid]: updatedProfile
-        }));
-        setEditMode(false);
-        setMessage({ type: 'success', text: 'Profile updated successfully (mock)!' });
+    const handleSave = async () => {
+        try {
+            const updatedProfile = await makeAuthenticatedRequest('/.netlify/functions/update-user-profile', 'PUT', formData);
+            setUserProfile(updatedProfile); // Update global user profile state
+            setEditMode(false);
+            setMessage({ type: 'success', text: 'Profile updated successfully!' });
+        } catch (error) {
+            // Error handled by makeAuthenticatedRequest
+        }
     };
 
     return (
@@ -1545,11 +1470,11 @@ const ProfilePage = () => {
                         <label className="block text-gray-700 text-sm font-bold mb-2">Bio:</label>
                         {editMode ? ( <textarea name="bio" value={formData.bio} onChange={handleChange} rows="5" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"></textarea> ) : ( <p className="text-gray-900 text-lg whitespace-pre-wrap">{userProfile?.bio || 'N/A'}</p> )}
                     </div>
-                    {userProfile.role === 'provider' && (
+                    {userProfile?.role === 'provider' && (
                         <>
                             <div>
                                 <label className="block text-gray-700 text-sm font-bold mb-2">Company Name:</label>
-                                {editMode ? ( <input type="text" name="companyName" value={formData.companyName} onChange={handleChange} className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"/> ) : ( <p className="text-gray-900 text-lg">{userProfile?.companyName || 'N/A'}</p> )}
+                                {editMode ? ( <input type="text" name="company_name" value={formData.company_name} onChange={handleChange} className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"/> ) : ( <p className="text-gray-900 text-lg">{userProfile?.company_name || 'N/A'}</p> )}
                             </div>
                             <div>
                                 <label className="block text-gray-700 text-sm font-bold mb-2">Specialties:</label>
@@ -1562,7 +1487,7 @@ const ProfilePage = () => {
 
             {editMode && (
                 <div className="mt-8 flex justify-end space-x-4">
-                    <button onClick={() => { setEditMode(false); setMessage({ type: '', text: '' }); }} className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">Cancel</button>
+                    <button onClick={() => { setEditMode(false); setMessage(null); }} className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">Cancel</button>
                     <button type="submit" onClick={handleSave} className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200">Save Changes</button>
                 </div>
             )}
@@ -1571,8 +1496,8 @@ const ProfilePage = () => {
 };
 
 // Added setShowPostProblemModal to ProblemListPage props
-const ProblemListPage = ({ onNavigate, setShowPostProblemModal }) => {
-    const { userRole, userId, mockProblems, setMessage } = useContext(AppContext);
+const ProblemListPage = ({ setShowPostProblemModal }) => {
+    const { userRole, problems, fetchPublicProblems, setCurrentPage } = useContext(AppContext);
 
     const [filterCategory, setFilterCategory] = useState('All');
     const [filterLocation, setFilterLocation] = useState('All');
@@ -1580,11 +1505,16 @@ const ProblemListPage = ({ onNavigate, setShowPostProblemModal }) => {
     const [maxBudget, setMaxBudget] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
-    const uniqueCategories = ['All', ...new Set(mockProblems.map(p => p.category))];
-    const uniqueLocations = ['All', ...new Set(mockProblems.map(p => p.location))];
+    useEffect(() => {
+        fetchPublicProblems();
+    }, [fetchPublicProblems]);
 
-    const filteredProblems = mockProblems.filter(problem => {
-        if (userRole !== 'admin' && !problem.isApproved) {
+    const uniqueCategories = ['All', ...new Set(problems.map(p => p.category).filter(Boolean))];
+    const uniqueLocations = ['All', ...new Set(problems.map(p => p.location).filter(Boolean))];
+
+    const filteredProblems = problems.filter(problem => {
+        // Only show approved problems to non-admin users
+        if (userRole !== 'admin' && !problem.is_approved) {
             return false;
         }
         if (filterCategory !== 'All' && problem.category !== filterCategory) {
@@ -1593,7 +1523,7 @@ const ProblemListPage = ({ onNavigate, setShowPostProblemModal }) => {
         if (filterLocation !== 'All' && problem.location !== filterLocation) {
             return false;
         }
-        const budget = problem.estimatedBudget;
+        const budget = problem.estimated_budget; // Use snake_case for DB field
         if (minBudget && budget < parseFloat(minBudget)) {
             return false;
         }
@@ -1604,7 +1534,7 @@ const ProblemListPage = ({ onNavigate, setShowPostProblemModal }) => {
             return false;
         }
         return true;
-    }).sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime());
+    }).sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()); // Use created_at
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-md">
@@ -1656,8 +1586,7 @@ const ProblemListPage = ({ onNavigate, setShowPostProblemModal }) => {
                             key={problem.id}
                             problem={problem}
                             userRole={userRole}
-                            currentUserId={userId}
-                            onNavigate={onNavigate}
+                            onNavigate={setCurrentPage}
                         />
                     ))}
                 </div>
@@ -1666,8 +1595,9 @@ const ProblemListPage = ({ onNavigate, setShowPostProblemModal }) => {
     );
 };
 
-const ProblemCard = ({ problem, userRole, currentUserId, onNavigate }) => {
+const ProblemCard = ({ problem, userRole, onNavigate }) => {
     const handleViewDetails = () => {
+        // Use history API or context to navigate to detail page
         window.location.hash = `problem-detail/${problem.id}`;
         onNavigate('problem-detail');
     };
@@ -1678,10 +1608,10 @@ const ProblemCard = ({ problem, userRole, currentUserId, onNavigate }) => {
             <p className="text-gray-700 mb-2 text-sm truncate">{problem.description}</p>
             <p className="text-gray-600 font-medium text-xs">Category: {problem.category || 'General'}</p>
             <p className="text-gray-600 font-medium text-xs">Location: {problem.location || 'N/A'}</p>
-            <p className="text-gray-600 font-medium text-xs">Budget: R{problem.estimatedBudget?.toFixed(2) || 'N/A'}</p>
+            <p className="text-gray-600 font-medium text-xs">Budget: R{problem.estimated_budget?.toFixed(2) || 'N/A'}</p>
             <p className="text-gray-600 font-medium text-xs">Status: <span className="capitalize">{problem.status}</span></p>
-            <p className="text-gray-500 text-xs mt-1">Posted: {problem.createdAt?.toLocaleDateString()}</p>
-            {!problem.isApproved && (
+            <p className="text-gray-500 text-xs mt-1">Posted: {new Date(problem.created_at)?.toLocaleDateString()}</p>
+            {!problem.is_approved && (
                 <span className="px-2 py-1 text-xs font-semibold bg-red-100 text-red-800 rounded-full mt-2 inline-block">Awaiting Admin Approval</span>
             )}
 
@@ -1695,9 +1625,8 @@ const ProblemCard = ({ problem, userRole, currentUserId, onNavigate }) => {
 };
 
 // ProblemDetailPage handles displaying details and also acts as an edit modal if needed
-const ProblemDetailPage = ({ problem, onNavigate, onClose, onSave, onAcceptQuote, onDeleteProblem, onMarkResolved, mockUserProfiles }) => {
-    const { userRole, userId, isPaidMember, setMessage, handleSubmitQuote } = useContext(AppContext);
-    const [showQuoteForm, setShowQuoteForm] = useState(false);
+const ProblemDetailPage = ({ problem, onClose, onSave, onAcceptQuote, onDeleteProblem, onMarkResolved, onApproveProblem }) => {
+    const { userRole, userProfile, isPaidMember, setSubmittingQuoteForProblem, setEditingQuote, setMessage } = useContext(AppContext);
     const [confirmModalMessage, setConfirmModalMessage] = useState('');
     const [confirmModalAction, setConfirmModalAction] = useState(null);
     const [showConfirmModalLocal, setShowConfirmModalLocal] = useState(false);
@@ -1705,13 +1634,13 @@ const ProblemDetailPage = ({ problem, onNavigate, onClose, onSave, onAcceptQuote
 
     const [formData, setFormData] = useState({
         title: problem.title, description: problem.description, category: problem.category,
-        location: problem.location, estimatedBudget: problem.estimatedBudget,
+        location: problem.location, estimated_budget: problem.estimated_budget, // Use snake_case
     });
 
     useEffect(() => {
         setFormData({
             title: problem.title, description: problem.description, category: problem.category,
-            location: problem.location, estimatedBudget: problem.estimatedBudget,
+            location: problem.location, estimated_budget: problem.estimated_budget,
         });
     }, [problem]);
 
@@ -1723,15 +1652,20 @@ const ProblemDetailPage = ({ problem, onNavigate, onClose, onSave, onAcceptQuote
     const handleSaveLocal = (e) => {
         e.preventDefault();
         onSave(problem.id, formData);
-        setMessage({ type: 'success', text: 'Problem updated successfully (mock).' });
+    };
+
+    // Corrected the problematic line:
+    const handleEditQuoteClick = (quote) => {
+        setEditingQuote(quote);
     };
 
 
-    const isRequester = userRole === 'member' && problem.requesterId === userId;
+    const isRequester = userProfile?.id === problem.requester_id; // Use DB ID
     const isProblemOpen = problem.status === 'open';
-    const hasAcceptedQuote = problem.status === 'closed' && problem.acceptedQuoteId;
+    // Removed unused 'hasAcceptedQuote' variable
 
-    const triggerConfirmation = (message, action) => {
+
+    const triggerConfirmationLocal = (message, action) => { // Renamed to avoid conflict with context
         setConfirmModalMessage(message);
         setConfirmModalAction(() => action);
         setShowConfirmModalLocal(true);
@@ -1742,31 +1676,31 @@ const ProblemDetailPage = ({ problem, onNavigate, onClose, onSave, onAcceptQuote
 
     return (
         <div className={`bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl overflow-y-auto max-h-[90vh] rounded-md ${isModal ? 'fixed inset-0 flex items-center justify-center z-50 bg-gray-600 bg-opacity-50' : ''}`}>
-            <div className={isModal ? 'bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-md' : ''}> {/* Adjusted max-h for mobile */}
+            <div className={isModal ? 'bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-md' : ''}>
                 <h2 className="text-3xl font-bold text-gray-800 mb-4">{problem.title}</h2>
                 <form onSubmit={handleSaveLocal}>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="mb-4">
                             <label htmlFor="edit-problem-title" className="block text-sm font-medium text-gray-700">Title</label>
-                            <input type="text" id="edit-problem-title" name="title" value={formData.title} onChange={handleChange} readOnly={userRole !== 'admin' && problem.requesterId !== userId} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 sm:text-sm" />
+                            <input type="text" id="edit-problem-title" name="title" value={formData.title} onChange={handleChange} readOnly={userRole !== 'admin' && problem.requester_id !== userProfile?.id} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 sm:text-sm" />
                         </div>
                         <div className="mb-4">
                             <label htmlFor="edit-problem-category" className="block text-sm font-medium text-gray-700">Category</label>
-                            <input type="text" id="edit-problem-category" name="category" value={formData.category} onChange={handleChange} readOnly={userRole !== 'admin' && problem.requesterId !== userId} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 sm:text-sm" />
+                            <input type="text" id="edit-problem-category" name="category" value={formData.category} onChange={handleChange} readOnly={userRole !== 'admin' && problem.requester_id !== userProfile?.id} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 sm:text-sm" />
                         </div>
                     </div>
                     <div className="mb-4">
                         <label htmlFor="edit-problem-description" className="block text-sm font-medium text-gray-700">Description</label>
-                        <textarea id="edit-problem-description" name="description" value={formData.description} onChange={handleChange} rows="3" readOnly={userRole !== 'admin' && problem.requesterId !== userId} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 sm:text-sm"></textarea>
+                        <textarea id="edit-problem-description" name="description" value={formData.description} onChange={handleChange} rows="3" readOnly={userRole !== 'admin' && problem.requester_id !== userProfile?.id} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 sm:text-sm"></textarea>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="mb-4">
                             <label htmlFor="edit-problem-location" className="block text-sm font-medium text-gray-700">Location</label>
-                            <input type="text" id="edit-problem-location" name="location" value={formData.location} onChange={handleChange} readOnly={userRole !== 'admin' && problem.requesterId !== userId} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 sm:text-sm" />
+                            <input type="text" id="edit-problem-location" name="location" value={formData.location} onChange={handleChange} readOnly={userRole !== 'admin' && problem.requester_id !== userProfile?.id} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 sm:text-sm" />
                         </div>
                         <div className="mb-4">
                             <label htmlFor="edit-problem-budget" className="block text-sm font-medium text-gray-700">Estimated Budget (R)</label>
-                            <input type="number" id="edit-problem-budget" name="estimatedBudget" value={formData.estimatedBudget} step="0.01" onChange={handleChange} readOnly={userRole !== 'admin' && problem.requesterId !== userId} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 sm:text-sm" />
+                            <input type="number" id="edit-problem-budget" name="estimated_budget" value={formData.estimated_budget} step="0.01" onChange={handleChange} readOnly={userRole !== 'admin' && problem.requester_id !== userProfile?.id} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 sm:text-sm" />
                         </div>
                     </div>
                     <div className="mb-4">
@@ -1775,7 +1709,7 @@ const ProblemDetailPage = ({ problem, onNavigate, onClose, onSave, onAcceptQuote
                     </div>
 
                     <h3 className="text-2xl font-semibold text-gray-800 mt-6 mb-3">Quotes for this Problem</h3>
-                    {problem.quotes.length === 0 ? (
+                    {problem.quotes?.length === 0 ? (
                         <p className="text-gray-600">No quotes submitted yet for this problem.</p>
                     ) : (
                         <div className="overflow-x-auto">
@@ -1790,9 +1724,10 @@ const ProblemDetailPage = ({ problem, onNavigate, onClose, onSave, onAcceptQuote
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white divide-y divide-gray-200">
-                                    {problem.quotes.map(quote => (
+                                    {problem.quotes?.map(quote => (
                                         <tr key={quote.id}>
-                                            <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm font-medium text-gray-900">{isPaidMember || quote.status === 'accepted' || userRole === 'admin' ? quote.providerName : 'Confidential'}</div></td>
+                                            {/* Provider name and details are confidential unless paid member or accepted */}
+                                            <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm font-medium text-gray-900">{isPaidMember || quote.status === 'accepted' || userRole === 'admin' ? quote.provider_name : 'Confidential'}</div></td>
                                             <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-900">R{isPaidMember || quote.status === 'accepted' || userRole === 'admin' ? quote.amount?.toFixed(2) : '---'}</div></td>
                                             <td className="px-6 py-4 whitespace-nowrap max-w-xs overflow-hidden text-ellipsis"><div className="text-sm text-gray-900">{isPaidMember || quote.status === 'accepted' || userRole === 'admin' ? quote.details : '---'}</div></td>
                                             <td className="px-6 py-4 whitespace-nowrap">
@@ -1807,6 +1742,9 @@ const ProblemDetailPage = ({ problem, onNavigate, onClose, onSave, onAcceptQuote
                                                 {isRequester && isProblemOpen && quote.status === 'pending' && isPaidMember && (
                                                     <button onClick={() => onAcceptQuote(problem.id, quote.id)} className="text-green-600 hover:text-green-900 mr-4">Accept Quote</button>
                                                 )}
+                                                {userRole === 'provider' && userProfile?.id === quote.provider_id && quote.status === 'pending' && (
+                                                    <button onClick={() => handleEditQuoteClick(quote)} className="text-blue-600 hover:text-blue-900 mr-4">Edit Quote</button>
+                                                )}
                                             </td>
                                         </tr>
                                     ))}
@@ -1814,34 +1752,42 @@ const ProblemDetailPage = ({ problem, onNavigate, onClose, onSave, onAcceptQuote
                             </table>
                         </div>
                     )}
+                    {userRole === 'provider' && problem.status === 'open' && userProfile?.is_provider_approved && (
+                        <button onClick={() => setSubmittingQuoteForProblem(problem)} className="mt-6 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200">
+                            Submit Quote
+                        </button>
+                    )}
+                    {(userRole === 'admin' || isRequester) && problem.status === 'open' && (
+                        <button onClick={() => onMarkResolved(problem.id)} className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors duration-200">
+                            Mark as Resolved
+                        </button>
+                    )}
+                    {(userRole === 'admin' || isRequester) && (
+                        <button onClick={() => onDeleteProblem(problem.id)} className="mt-4 ml-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors duration-200">
+                            Delete Problem
+                        </button>
+                    )}
+                    {userRole === 'admin' && !problem.is_approved && (
+                        <button onClick={() => onApproveProblem(problem.id)} className="mt-4 ml-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200">
+                            Approve Problem
+                        </button>
+                    )}
 
-                    <div className="flex justify-end space-x-4 mt-6">
-                        {isModal ? (
-                            <button type="button" onClick={onClose} className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">Close</button>
-                        ) : (
-                            <button type="button" onClick={() => onNavigate('problems')} className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">Back to Problems</button>
-                        )}
-                        {(userRole === 'admin' || isRequester) && isProblemOpen && (
-                            <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200">Save Changes</button>
-                        )}
-                        {isRequester && problem.status === 'closed' && hasAcceptedQuote && (
-                            <button onClick={() => triggerConfirmation("Are you sure you want to mark this problem as resolved?", () => onMarkResolved(problem.id))} className="px-6 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200">Mark as Resolved</button>
-                        )}
-                        {(userRole === 'admin' || isRequester) && (
-                            <button onClick={() => triggerConfirmation("Are you sure you want to delete this problem and all associated quotes?", () => onDeleteProblem(problem.id))} className="px-6 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200">Delete Problem</button>
-                        )}
-                    </div>
+                    {isModal && (
+                        <div className="mt-6 flex justify-end">
+                            {((userRole === 'admin' && problem.requester_id !== userProfile?.id) || (userRole === 'member' && problem.requester_id === userProfile?.id)) && (
+                                <button type="submit" className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200">Save Changes</button>
+                            )}
+                            <button onClick={onClose} className="ml-4 px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">Close</button>
+                        </div>
+                    )}
                 </form>
 
                 {showConfirmModalLocal && (
-                    <ConfirmationModal message={confirmModalMessage} onConfirm={confirmModalAction} onCancel={() => setShowConfirmModalLocal(false)}/>
-                )}
-                 {showQuoteForm && (
-                    <QuoteModal
-                        onClose={() => setShowQuoteForm(false)}
-                        onSubmit={(quoteData) => handleSubmitQuote(problem.id, quoteData)}
-                        problemTitle={problem.title}
-                        problemId={problem.id}
+                    <ConfirmationModal
+                        message={confirmModalMessage}
+                        onConfirm={confirmModalAction}
+                        onCancel={() => setShowConfirmModalLocal(false)}
                     />
                 )}
             </div>
@@ -1849,59 +1795,66 @@ const ProblemDetailPage = ({ problem, onNavigate, onClose, onSave, onAcceptQuote
     );
 };
 
-
-const PostProblemModal = ({ onClose, onSave, activeProblemsCount, isPaidMember }) => {
+// --- Modals for specific actions ---
+const PostProblemModal = ({ onClose, onSave, isPaidMember }) => {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [category, setCategory] = useState('');
     const [location, setLocation] = useState('');
     const [estimatedBudget, setEstimatedBudget] = useState('');
     const [formError, setFormError] = useState('');
-
-    const MAX_FREE_PROBLEMS = 5;
+    const { userProfile, setMessage } = useContext(AppContext); // Removed unused userRole
 
     const handleSubmit = (e) => {
         e.preventDefault();
         setFormError('');
+        setMessage(null); // Clear global message
 
         if (!title || !description || !category || !location || !estimatedBudget) {
             setFormError('All fields are required.');
             return;
         }
-        if (isNaN(estimatedBudget) || parseFloat(estimatedBudget) <= 0) {
+        if (parseFloat(estimatedBudget) <= 0) {
             setFormError('Budget must be a positive number.');
             return;
         }
 
-        if (!isPaidMember && activeProblemsCount >= MAX_FREE_PROBLEMS) {
-            setFormError(`Free members are limited to ${MAX_FREE_PROBLEMS} active problems. Please upgrade to post more.`);
-            return;
-        }
-
-        onSave({ title, description, category, location, estimatedBudget });
-        onClose();
+        const newProblem = {
+            title, description, category, location,
+            estimated_budget: parseFloat(estimatedBudget), // Use snake_case
+            requester_id: userProfile.id, // Use DB ID
+            status: 'open',
+            is_approved: false, // Will require admin approval
+        };
+        onSave(newProblem); // Call the parent's save handler
     };
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md">
                 <h3 className="text-2xl font-bold text-gray-800 mb-6">Post a New Problem</h3>
+                {!isPaidMember && (
+                    <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4 rounded-md" role="alert">
+                        <p className="font-bold">Free member limit:</p>
+                        <p className="text-sm">As a free member, your problem will be public but features like accepting quotes are locked. Upgrade to a paid plan to unlock all features.</p>
+                    </div>
+                )}
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemTitle">Problem Title</label>
-                        <input type="text" id="problemTitle" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={title} onChange={(e) => setTitle(e.target.value)} required />
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="title">Title</label>
+                        <input type="text" id="title" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={title} onChange={(e) => setTitle(e.target.value)} required />
                     </div>
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemDescription">Description</label>
-                        <textarea id="problemDescription" rows="4" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={description} onChange={(e) => setDescription(e.target.value)} required ></textarea>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="description">Description</label>
+                        <textarea id="description" rows="3" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={description} onChange={(e) => setDescription(e.target.value)} required></textarea>
                     </div>
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemCategory">Category</label>
-                        <input type="text" id="problemCategory" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={category} onChange={(e) => setCategory(e.target.value)} required />
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="category">Category</label>
+                        <input type="text" id="category" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={category} onChange={(e) => setCategory(e.target.value)} required />
                     </div>
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="problemLocation">Location</label>
-                        <input type="text" id="problemLocation" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={location} onChange={(e) => setLocation(e.target.value)} required />
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="location">Location</label>
+                        <input type="text" id="location" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={location} onChange={(e) => setLocation(e.target.value)} required />
                     </div>
                     <div>
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="estimatedBudget">Estimated Budget (R)</label>
@@ -1921,22 +1874,23 @@ const PostProblemModal = ({ onClose, onSave, activeProblemsCount, isPaidMember }
 };
 
 const QuoteModal = ({ onClose, onSubmit, problemTitle, problemId }) => {
-    const { handleSubmitQuote } = useContext(AppContext);
-    const [proposedStartDate, setProposedStartDate] = useState('');
-    const [proposedEndDate, setProposedEndDate] = useState('');
     const [proposedBudget, setProposedBudget] = useState('');
     const [motivation, setMotivation] = useState('');
+    const [proposedStartDate, setProposedStartDate] = useState('');
+    const [proposedEndDate, setProposedEndDate] = useState('');
     const [formError, setFormError] = useState('');
+    const { setMessage } = useContext(AppContext);
 
     const handleSubmit = (e) => {
         e.preventDefault();
         setFormError('');
+        setMessage(null);
 
-        if (!proposedStartDate || !proposedEndDate || !proposedBudget || !motivation) {
+        if (!proposedBudget || !motivation || !proposedStartDate || !proposedEndDate) {
             setFormError('All fields are required.');
             return;
         }
-        if (isNaN(proposedBudget) || parseFloat(proposedBudget) <= 0) {
+        if (parseFloat(proposedBudget) <= 0) {
             setFormError('Proposed Budget must be a positive number.');
             return;
         }
@@ -1945,15 +1899,27 @@ const QuoteModal = ({ onClose, onSubmit, problemTitle, problemId }) => {
             return;
         }
 
-        onSubmit(problemId, { proposedStartDate, proposedEndDate, proposedBudget: parseFloat(proposedBudget), motivation });
-        onClose();
+        onSubmit(problemId, {
+            proposedBudget: parseFloat(proposedBudget),
+            motivation,
+            proposedStartDate,
+            proposedEndDate
+        });
     };
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">Submit a Quote for "{problemTitle}"</h3>
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md">
+                <h3 className="text-2xl font-bold text-gray-800 mb-6">Submit Quote for: "{problemTitle}"</h3>
                 <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="proposedBudget">Proposed Budget (R)</label>
+                        <input type="number" id="proposedBudget" step="0.01" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={proposedBudget} onChange={(e) => setProposedBudget(e.target.value)} required />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="motivation">Motivation / Details</label>
+                        <textarea id="motivation" rows="4" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={motivation} onChange={(e) => setMotivation(e.target.value)} required></textarea>
+                    </div>
                     <div>
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="proposedStartDate">Proposed Start Date</label>
                         <input type="date" id="proposedStartDate" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={proposedStartDate} onChange={(e) => setProposedStartDate(e.target.value)} required />
@@ -1962,20 +1928,12 @@ const QuoteModal = ({ onClose, onSubmit, problemTitle, problemId }) => {
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="proposedEndDate">Proposed End Date</label>
                         <input type="date" id="proposedEndDate" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={proposedEndDate} onChange={(e) => setProposedEndDate(e.target.value)} required />
                     </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="proposedBudget">Proposed Budget (R)</label>
-                        <input type="number" id="proposedBudget" step="0.01" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={proposedBudget} onChange={(e) => setProposedBudget(e.target.value)} required />
-                    </div>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="motivation">Motivation / Details of Work</label>
-                        <textarea id="motivation" rows="5" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={motivation} onChange={(e) => setMotivation(e.target.value)} required></textarea>
-                    </div>
 
                     {formError && (<p className="text-red-500 text-sm">{formError}</p>)}
 
                     <div className="flex justify-end space-x-4 mt-6">
                         <button type="button" onClick={onClose} className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">Cancel</button>
-                        <button type="submit" className="px-6 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200">Submit Quote</button>
+                        <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200">Submit Quote</button>
                     </div>
                 </form>
             </div>
@@ -1983,61 +1941,60 @@ const QuoteModal = ({ onClose, onSubmit, problemTitle, problemId }) => {
     );
 };
 
-const EditQuoteModal = ({ quote, onClose, onSave, problemTitle }) => {
-    const [formData, setFormData] = useState({
-        amount: quote.amount,
-        details: quote.details,
-        proposedStartDate: quote.proposedStartDate,
-        proposedEndDate: quote.proposedEndDate,
-    });
+const EditQuoteModal = ({ onClose, onSave, quote, problemTitle }) => {
+    const [amount, setAmount] = useState(quote.amount || '');
+    const [details, setDetails] = useState(quote.details || '');
+    const [proposedStartDate, setProposedStartDate] = useState(quote.proposed_start_date ? new Date(quote.proposed_start_date).toISOString().split('T')[0] : '');
+    const [proposedEndDate, setProposedEndDate] = useState(quote.proposed_end_date ? new Date(quote.proposed_end_date).toISOString().split('T')[0] : '');
     const [formError, setFormError] = useState('');
-
-    const handleChange = (e) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
-    };
+    const { setMessage } = useContext(AppContext);
 
     const handleSubmit = (e) => {
         e.preventDefault();
         setFormError('');
+        setMessage(null);
 
-        if (!formData.proposedStartDate || !formData.proposedEndDate || !formData.amount || !formData.details) {
+        if (!amount || !details || !proposedStartDate || !proposedEndDate) {
             setFormError('All fields are required.');
             return;
         }
-        if (isNaN(formData.amount) || parseFloat(formData.amount) <= 0) {
-            setFormError('Proposed Budget must be a positive number.');
+        if (parseFloat(amount) <= 0) {
+            setFormError('Amount must be a positive number.');
             return;
         }
-        if (new Date(formData.proposedStartDate) > new Date(formData.proposedEndDate)) {
+        if (new Date(proposedStartDate) > new Date(proposedEndDate)) {
             setFormError('Proposed Start Date cannot be after Proposed End Date.');
             return;
         }
 
-        onSave(quote.problemId, quote.id, formData);
-        onClose();
+        onSave(quote.problem_id, quote.id, {
+            amount: parseFloat(amount),
+            details,
+            proposedStartDate,
+            proposedEndDate,
+        });
     };
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">Edit Quote for "{problemTitle}"</h3>
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md">
+                <h3 className="text-2xl font-bold text-gray-800 mb-6">Edit Quote for: "{problemTitle}"</h3>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="editQuoteAmount">Quoted Amount (R)</label>
-                        <input type="number" id="editQuoteAmount" name="amount" step="0.01" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={formData.amount} onChange={handleChange} required />
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="editQuoteAmount">Proposed Amount (R)</label>
+                        <input type="number" id="editQuoteAmount" step="0.01" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={amount} onChange={(e) => setAmount(e.target.value)} required />
                     </div>
                     <div>
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="editQuoteDetails">Details</label>
-                        <textarea id="editQuoteDetails" name="details" rows="3" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={formData.details} onChange={handleChange} required></textarea>
+                        <textarea id="editQuoteDetails" rows="4" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={details} onChange={(e) => setDetails(e.target.value)} required></textarea>
                     </div>
                     <div>
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="editQuoteStartDate">Proposed Start Date</label>
-                        <input type="date" id="editQuoteStartDate" name="proposedStartDate" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={formData.proposedStartDate} onChange={handleChange} required />
+                        <input type="date" id="editQuoteStartDate" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={proposedStartDate} onChange={(e) => setProposedStartDate(e.target.value)} required />
                     </div>
                     <div>
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="editQuoteEndDate">Proposed End Date</label>
-                        <input type="date" id="editQuoteEndDate" name="proposedEndDate" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={formData.proposedEndDate} onChange={handleChange} required />
+                        <input type="date" id="editQuoteEndDate" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={proposedEndDate} onChange={(e) => setProposedEndDate(e.target.value)} required />
                     </div>
 
                     {formError && (<p className="text-red-500 text-sm">{formError}</p>)}
@@ -2052,156 +2009,33 @@ const EditQuoteModal = ({ quote, onClose, onSave, problemTitle }) => {
     );
 };
 
-const MyQuotesPage = () => {
-    const { userId, mockProblems, handleWithdrawQuote, handleEditQuote } = useContext(AppContext);
-    const [myQuotes, setMyQuotes] = useState([]);
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [confirmAction, setConfirmAction] = useState(null);
-    const [confirmMessage, setConfirmMessage] = useState('');
-    const [editingQuoteLocal, setEditingQuoteLocal] = useState(null);
-
-    useEffect(() => {
-        // This data will be fetched from Neon DB via Netlify Functions
-        let providerQuotes = [];
-        mockProblems.forEach(problem => {
-            problem.quotes.forEach(quote => {
-                if (quote.providerId === userId) {
-                    providerQuotes.push({
-                        ...quote,
-                        problemId: problem.id,
-                        problemTitle: problem.title,
-                        problemStatus: problem.status
-                    });
-                }
-            });
-        });
-        setMyQuotes(providerQuotes.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
-    }, [mockProblems, userId]);
-
-    const triggerConfirmation = (message, action) => {
-        setConfirmMessage(message);
-        setConfirmAction(() => action);
-        setShowConfirmModal(true);
-    };
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
-                <PackageIcon size={28} className="mr-3 text-[#964b00]" /> My Submitted Quotes
-            </h2>
-
-            {myQuotes.length === 0 ? (
-                <p className="text-gray-600">You haven't submitted any quotes yet. Browse the Problem List to find opportunities!</p>
-            ) : (
-                <div className="overflow-x-auto">
-                    <table className="min-w-full bg-white rounded-lg shadow-md">
-                        <thead>
-                            <tr className="bg-gray-200 text-gray-700 uppercase text-sm leading-normal">
-                                <th className="py-3 px-6 text-left">Problem Title</th>
-                                <th className="py-3 px-6 text-left">Amount</th>
-                                <th className="py-3 px-6 text-left">Details</th>
-                                <th className="py-3 px-6 text-left">Status</th>
-                                <th className="py-3 px-6 text-center">Problem Status</th>
-                                <th className="py-3 px-6 text-center">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="text-gray-600 text-sm font-light">
-                            {myQuotes.map(quote => (
-                                <tr key={quote.id} className="border-b border-gray-200 hover:bg-gray-100">
-                                    <td className="py-3 px-6 text-left whitespace-nowrap">{quote.problemTitle || 'N/A'}</td>
-                                    <td className="py-3 px-6 text-left">R{quote.amount?.toFixed(2) || 'N/A'}</td>
-                                    <td className="py-3 px-6 text-left max-w-xs overflow-hidden text-ellipsis">{quote.details || 'N/A'}</td>
-                                    <td className="py-3 px-6 text-left">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                                            quote.status === 'accepted' ? 'bg-green-100 text-green-800' :
-                                            quote.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                            'bg-red-100 text-red-800'
-                                        }`}>
-                                            {quote.status}
-                                        </span>
-                                    </td>
-                                     <td className="py-3 px-6 text-center">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold capitalize ${
-                                            quote.problemStatus === 'open' ? 'bg-gray-100 text-gray-800' :
-                                            quote.problemStatus === 'closed' ? 'bg-blue-100 text-blue-800' :
-                                            'bg-purple-100 text-purple-800'
-                                        }`}>
-                                            {quote.problemStatus || 'N/A'}
-                                        </span>
-                                    </td>
-                                    <td className="py-3 px-6 text-center">
-                                        {quote.status === 'pending' && quote.problemStatus === 'open' && (
-                                            <>
-                                                <button onClick={() => setEditingQuoteLocal(quote)} className="px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 text-xs mr-2">Edit</button>
-                                                <button onClick={() => triggerConfirmation("Are you sure you want to withdraw this quote?", () => handleWithdrawQuote(quote.problemId, quote.id))} className="px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 text-xs">Withdraw</button>
-                                            </>
-                                        )}
-                                        {quote.status === 'accepted' && ( <span className="text-green-600 text-sm font-bold">Accepted!</span> )}
-                                        {quote.status === 'pending' && (quote.problemStatus === 'closed' || quote.problemStatus === 'resolved') && ( <span className="text-gray-500 text-xs">Problem {quote.problemStatus}</span> )}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-            {showConfirmModal && ( <ConfirmationModal message={confirmMessage} onConfirm={confirmAction} onCancel={() => setShowConfirmModal(false)}/> )}
-            {editingQuoteLocal && ( <EditQuoteModal quote={editingQuoteLocal} onClose={() => setEditingQuoteLocal(null)} onSave={handleEditQuote} problemTitle={myQuotes.find(q => q.id === editingQuoteLocal.id)?.problemTitle}/> )}
-        </div>
-    );
-};
+// --- User-specific Problem/Quote Views ---
 
 const MyRequestsPage = () => {
-    const { userId, mockProblems, isPaidMember, handleAcceptQuote, handleMarkProblemResolved, handleDeleteProblem } = useContext(AppContext);
-    const [myProblems, setMyProblems] = useState([]);
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [confirmAction, setConfirmAction] = useState(null);
-    const [confirmMessage, setConfirmMessage] = useState('');
+    const { userProfile, problems, fetchMyProblems, setCurrentPage, handleAcceptQuote, handleDeleteProblem, handleEditProblem, handleMarkProblemResolved } = useContext(AppContext);
 
     useEffect(() => {
-        // This data will be fetched from Neon DB via Netlify Functions
-        const memberProblems = mockProblems.filter(problem => problem.requesterId === userId);
-        setMyProblems(memberProblems.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
-    }, [mockProblems, userId]);
+        fetchMyProblems();
+    }, [fetchMyProblems]); // Depend on the fetch function from context
 
-    const triggerConfirmation = (message, action) => {
-        setConfirmMessage(message);
-        setConfirmAction(() => action);
-        setShowConfirmModal(true);
-    };
+    const myProblems = problems.filter(p => p.requester_id === userProfile?.id)
+                               .sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-    if (!isPaidMember) {
-        return (
-        <div className="bg-white p-6 rounded-lg shadow-md text-center py-12 rounded-md"> {/* Added rounded-md */}
-            <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
-            <p className="text-gray-700 mb-6">
-            You must be a <strong>paid member</strong> to view and manage quotes for your problems.
-            Free members can post problems (limit 5) but require a paid membership for full interaction.
-            </p>
-            <button onClick={() => window.location.hash = 'pricing'} className="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200">
-            Upgrade Membership
-            </button>
-        </div>
-        );
-    }
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
-                <FileTextIcon size={28} className="mr-3 text-[#964b00]" /> My Posted Problems & Quotes
-            </h2>
-
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">My Posted Problems</h2>
             {myProblems.length === 0 ? (
-                <p className="text-gray-600">You haven't posted any problems yet. Click "Post New Problem" on the Problem List page!</p>
+                <p className="text-gray-600">You haven't posted any problems yet.</p>
             ) : (
                 <div className="space-y-6">
                     {myProblems.map(problem => (
-                        <div key={problem.id} className="border border-gray-200 rounded-lg p-4 shadow-sm bg-gray-50 rounded-md"> {/* Added rounded-md */}
-                            <div className="flex justify-between items-center mb-3">
-                                <h3 className="text-xl font-bold text-gray-800">{problem.title}</h3>
+                        <div key={problem.id} className="border border-gray-200 rounded-lg p-4 shadow-sm rounded-md">
+                            <div className="flex justify-between items-start mb-2">
+                                <h3 className="text-xl font-semibold text-gray-800">{problem.title}</h3>
                                 <span className={`px-3 py-1 rounded-full text-sm font-semibold capitalize ${
-                                    problem.status === 'open' ? 'bg-yellow-100 text-yellow-800' :
-                                    problem.status === 'closed' ? 'bg-blue-100 text-blue-800' :
+                                    problem.status === 'open' ? 'bg-blue-100 text-blue-800' :
+                                    problem.status === 'closed' ? 'bg-yellow-100 text-yellow-800' :
                                     'bg-green-100 text-green-800'
                                 }`}>
                                     {problem.status}
@@ -2209,367 +2043,510 @@ const MyRequestsPage = () => {
                             </div>
                             <p className="text-gray-700 mb-2">{problem.description}</p>
                             <p className="text-gray-600 text-sm">Category: {problem.category}</p>
-                            <p className="text-gray-500 text-xs mt-1">Posted: {problem.createdAt?.toLocaleString()}</p>
-                            {!problem.isApproved && (
-                                <span className="px-2 py-1 text-xs font-semibold bg-red-100 text-red-800 rounded-full mt-2 inline-block">Awaiting Admin Approval</span>
-                            )}
+                            <p className="text-gray-600 text-sm">Location: {problem.location}</p>
+                            <p className="text-gray-600 text-sm">Budget: R{problem.estimated_budget?.toFixed(2)}</p>
+                            <p className="text-gray-500 text-xs mt-1">Posted: {new Date(problem.created_at)?.toLocaleDateString()}</p>
 
-                            <div className="mt-4 flex space-x-3">
-                                <button onClick={() => {
-                                    window.location.hash = `problem-detail/${problem.id}`;
-                                }}
-                                className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 text-sm flex items-center"
+                            <div className="mt-4 flex space-x-2">
+                                <button
+                                    onClick={() => setCurrentPage('problem-detail') || (window.location.hash = `problem-detail/${problem.id}`)}
+                                    className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 flex items-center text-sm"
                                 >
-                                    <PackageIcon size={18} className="mr-2" /> View Quotes ({problem.quotes?.length || 0})
+                                    <FileTextIcon size={16} className="mr-1" /> View Details
                                 </button>
-                                {problem.status === 'open' && (
-                                    <button onClick={() => triggerConfirmation("Are you sure you want to delete this problem and all its quotes?", () => handleDeleteProblem(problem.id))} className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 text-sm flex items-center">
-                                        <XCircleIcon size={18} className="mr-2" /> Delete Problem
+                                <button
+                                    onClick={() => handleEditProblem(problem.id, { title: problem.title, description: problem.description, category: problem.category, location: problem.location, estimated_budget: problem.estimated_budget })}
+                                    className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 flex items-center text-sm"
+                                >
+                                    <EditIcon size={16} className="mr-1" /> Edit
+                                </button>
+                                <button
+                                    onClick={() => handleDeleteProblem(problem.id)}
+                                    className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 flex items-center text-sm"
+                                >
+                                    <XCircleIcon size={16} className="mr-1" /> Delete
+                                </button>
+                                {problem.status !== 'resolved' && problem.accepted_quote_id && (
+                                    <button
+                                        onClick={() => handleMarkProblemResolved(problem.id)}
+                                        className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200 flex items-center text-sm"
+                                    >
+                                        <CheckCircleIcon size={16} className="mr-1" /> Mark Resolved
                                     </button>
                                 )}
-                                {(problem.status === 'closed' && problem.acceptedQuoteId) && (
-                                    <button onClick={() => triggerConfirmation("Are you sure you want to mark this problem as resolved? This cannot be undone.", () => handleMarkProblemResolved(problem.id))} className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200 text-sm flex items-center">
-                                        <CheckCircleIcon size={18} className="mr-2" /> Mark as Resolved
-                                    </button>
+                            </div>
+
+                            {/* Quotes section */}
+                            <h4 className="text-lg font-semibold text-gray-800 mt-6 mb-3">Quotes Received ({problem.quotes?.length || 0})</h4>
+                            {problem.quotes?.length === 0 ? (
+                                <p className="text-gray-600 text-sm">No quotes received for this problem yet.</p>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                        <thead className="bg-gray-50">
+                                            <tr>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Provider</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-gray-200">
+                                            {problem.quotes?.map(quote => (
+                                                <tr key={quote.id}>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{quote.provider_name}</td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">R{quote.amount?.toFixed(2)}</td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                                            quote.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                                                            'bg-yellow-100 text-yellow-800'
+                                                        }`}>
+                                                            {quote.status}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                                        {problem.status === 'open' && quote.status === 'pending' && (
+                                                            <button
+                                                                onClick={() => handleAcceptQuote(problem.id, quote.id)}
+                                                                className="text-green-600 hover:text-green-900"
+                                                            >
+                                                                Accept
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const MyQuotesPage = () => {
+    const { userProfile, problems, fetchMyQuotes, setEditingQuote, handleWithdrawQuote } = useContext(AppContext);
+    const [myQuotesDetailed, setMyQuotesDetailed] = useState([]);
+
+    useEffect(() => {
+        if (userProfile?.role === 'provider') {
+            fetchMyQuotes();
+        }
+    }, [userProfile, fetchMyQuotes]);
+
+    useEffect(() => {
+        // Process global problems state to get detailed quotes for the current provider
+        if (userProfile?.role === 'provider' && problems.length > 0) {
+            const providerQuotes = [];
+            problems.forEach(problem => {
+                problem.quotes?.forEach(quote => {
+                    if (quote.provider_id === userProfile.id) {
+                        providerQuotes.push({
+                            ...quote,
+                            problemTitle: problem.title,
+                            problemDescription: problem.description,
+                            problemStatus: problem.status,
+                            problemCategory: problem.category,
+                            problemLocation: problem.location,
+                            problemRequesterId: problem.requester_id,
+                        });
+                    }
+                });
+            });
+            setMyQuotesDetailed(providerQuotes.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+        }
+    }, [problems, userProfile]);
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">My Submitted Quotes</h2>
+            {myQuotesDetailed.length === 0 ? (
+                <p className="text-gray-600">You haven't submitted any quotes yet.</p>
+            ) : (
+                <div className="space-y-6">
+                    {myQuotesDetailed.map(quote => (
+                        <div key={quote.id} className="border border-gray-200 rounded-lg p-4 shadow-sm rounded-md">
+                            <div className="flex justify-between items-start mb-2">
+                                <h3 className="text-xl font-semibold text-gray-800">Quote for: "{quote.problemTitle}"</h3>
+                                <span className={`px-3 py-1 rounded-full text-sm font-semibold capitalize ${
+                                    quote.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                                    quote.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                                    'bg-yellow-100 text-yellow-800'
+                                }`}>
+                                    {quote.status}
+                                </span>
+                            </div>
+                            <p className="text-gray-700 mb-2">Amount: R{quote.amount?.toFixed(2)}</p>
+                            <p className="text-gray-600 text-sm">Details: {quote.details}</p>
+                            <p className="text-gray-600 text-sm">Proposed Start: {new Date(quote.proposed_start_date)?.toLocaleDateString()}</p>
+                            <p className="text-600 text-sm">Proposed End: {new Date(quote.proposed_end_date)?.toLocaleDateString()}</p>
+                            <p className="text-gray-500 text-xs mt-1">Submitted: {new Date(quote.created_at)?.toLocaleDateString()}</p>
+                            <p className="text-gray-500 text-xs mt-1">Problem Status: <span className="capitalize">{quote.problemStatus}</span></p>
+
+                            <div className="mt-4 flex space-x-2">
+                                {quote.status === 'pending' && quote.problemStatus === 'open' && (
+                                    <>
+                                        <button
+                                            onClick={() => setEditingQuote(quote)}
+                                            className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 flex items-center text-sm"
+                                        >
+                                            <EditIcon size={16} className="mr-1" /> Edit
+                                        </button>
+                                        <button
+                                            onClick={() => handleWithdrawQuote(quote.problemId, quote.id)}
+                                            className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 flex items-center text-sm"
+                                        >
+                                            <XCircleIcon size={16} className="mr-1" /> Withdraw
+                                        </button>
+                                    </>
                                 )}
                             </div>
                         </div>
                     ))}
                 </div>
             )}
-             {showConfirmModal && (<ConfirmationModal message={confirmMessage} onConfirm={confirmAction} onCancel={() => setShowConfirmModal(false)}/>)}
         </div>
     );
 };
+
+// --- Admin Pages ---
 
 const AdminToolsPage = () => {
-    const { userRole, mockProblems, setMockProblems, mockUserProfiles, handleApproveProvider, handleDeleteProvider, setMessage } = useContext(AppContext);
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [confirmAction, setConfirmAction] = useState(null);
-    const [confirmMessage, setConfirmMessage] = useState('');
-
-    if (userRole !== 'admin') {
-        return (
-            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12 rounded-md"> {/* Added rounded-md */}
-                <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
-                <p className="text-gray-700 mb-6">You must be an **admin** to access this page.</p>
-            </div>
-        );
-    }
-
-    const handleApproveProblemLocal = (problemId) => {
-        // API call to approve problem in Neon DB
-        setMockProblems(prevProblems =>
-            prevProblems.map(problem =>
-                problem.id === problemId ? { ...problem, isApproved: true } : problem
-            )
-        );
-        setMessage({ type: 'success', text: `Problem ${problemId} approved (mock).` });
-    };
-
-    const handleDeleteProblemLocal = (problemId) => {
-        setConfirmMessage("Are you sure you want to delete this problem and all its quotes? This is permanent.");
-        setConfirmAction(() => () => {
-            // API call to delete problem from Neon DB
-            setMockProblems(prevProblems => prevProblems.filter(problem => problem.id !== problemId));
-            setMessage({ type: 'success', text: `Problem ${problemId} deleted (mock).` });
-            setShowConfirmModal(false);
-        });
-        setShowConfirmModal(true);
-    };
-
-    const problemsAwaitingApproval = mockProblems.filter(p => !p.isApproved);
-    const pendingProviderApprovals = Object.values(mockUserProfiles).filter(p => p.role === 'provider' && !p.isProviderApproved);
-    const allProviders = Object.values(mockUserProfiles).filter(p => p.role === 'provider');
-
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
-                <ShieldCheckIcon size={28} className="mr-3 text-[#964b00]" /> Admin Tools
-            </h2>
-
-            <div className="space-y-8">
-                {/* Admin Quick Actions */}
-                <div className="border border-gray-200 rounded-lg p-4 rounded-md"> {/* Added rounded-md */}
-                    <h3 className="text-xl font-bold text-gray-700 mb-4">Admin Quick Links</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <button onClick={() => window.location.hash = 'admin-pricing'} className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 flex items-center justify-center">
-                            <DollarSignIcon size={20} className="mr-2" /> Manage Pricing Plans
-                        </button>
-                        <button onClick={() => window.location.hash = 'admin-branding'} className="px-4 py-2 bg-[#964b00] text-white rounded-md hover:bg-[#b3641a] transition-colors duration-200 flex items-center justify-center">
-                            <PaintbrushIcon size={20} className="mr-2" /> Manage Branding
-                        </button>
-                    </div>
-                </div>
-
-                {/* Problem Management */}
-                <div className="border border-gray-200 rounded-lg p-4 rounded-md"> {/* Added rounded-md */}
-                    <h3 className="text-xl font-bold text-gray-700 mb-4">Problem Management</h3>
-                    <h4 className="text-lg font-semibold text-gray-600 mb-3">Problems Awaiting Approval ({problemsAwaitingApproval.length})</h4>
-                    {problemsAwaitingApproval.length === 0 ? (
-                        <p className="text-gray-500">No problems awaiting approval.</p>
-                    ) : (
-                        <ul className="divide-y divide-gray-200">
-                            {problemsAwaitingApproval.map(problem => (
-                                <li key={problem.id} className="py-2 flex justify-between items-center">
-                                    <span>{problem.title} (by {mockUserProfiles[problem.requesterId]?.name || 'Unknown'})</span>
-                                    <div>
-                                        <button onClick={() => handleApproveProblemLocal(problem.id)} className="ml-3 px-3 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 text-sm">Approve</button>
-                                        <button onClick={() => handleDeleteProblemLocal(problem.id)} className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm">Delete</button>
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-
-                     <h4 className="text-lg font-semibold text-gray-600 mt-6 mb-3">All Problems ({mockProblems.length})</h4>
-                     <ul className="divide-y divide-gray-200">
-                        {mockProblems.map(problem => (
-                            <li key={problem.id} className="py-2 flex justify-between items-center">
-                                <span>{problem.title} ({problem.status} - {problem.isApproved ? 'Approved' : 'Pending'})</span>
-                                <button onClick={() => handleDeleteProblemLocal(problem.id)} className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm">Delete</button>
-                            </li>
-                        ))}
-                     </ul>
-                </div>
-
-                {/* Provider Management */}
-                <div className="border border-gray-200 rounded-lg p-4 rounded-md"> {/* Added rounded-md */}
-                    <h3 className="text-xl font-bold text-gray-700 mb-4">Provider Management</h3>
-                    <h4 className="text-lg font-semibold text-gray-600 mb-3">Providers Awaiting Approval ({pendingProviderApprovals.length})</h4>
-                    {pendingProviderApprovals.length === 0 ? (
-                        <p className="text-gray-500">No providers awaiting approval.</p>
-                    ) : (
-                        <ul className="divide-y divide-gray-200">
-                            {pendingProviderApprovals.map(provider => (
-                                <li key={provider.uid} className="py-2 flex justify-between items-center">
-                                    <span>{provider.name} ({provider.companyName || 'N/A'})</span>
-                                    <div>
-                                        <button onClick={() => handleApproveProvider(provider.uid)} className="ml-3 px-3 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 text-sm">Approve</button>
-                                        <button onClick={() => handleDeleteProvider(provider.uid)} className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm">Delete</button>
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                    <h4 className="text-lg font-semibold text-gray-600 mt-6 mb-3">All Providers ({allProviders.length})</h4>
-                     <ul className="divide-y divide-gray-200">
-                        {allProviders.map(provider => (
-                            <li key={provider.uid} className="py-2 flex justify-between items-center">
-                                <span>{provider.name} ({provider.isProviderApproved ? 'Approved' : 'Pending'})</span>
-                                <button onClick={() => handleDeleteProvider(provider.uid)} className="ml-3 px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm">Delete</button>
-                            </li>
-                        ))}
-                     </ul>
-                </div>
-            </div>
-            {showConfirmModal && (<ConfirmationModal message={confirmMessage} onConfirm={confirmAction} onCancel={() => setShowConfirmModal(false)}/>)}
-        </div>
-    );
-};
-
-const AdminPricingPage = () => {
-    const { userRole, mockPricingPlans, handleSavePricingPlan, handleDeletePricingPlan, setMessage } = useContext(AppContext);
-    const [showEditPlanModal, setShowEditPlanModal] = useState(false);
-    const [currentEditingPlan, setCurrentEditingPlan] = useState(null);
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [confirmAction, setConfirmAction] = useState(null);
-    const [confirmMessage, setConfirmMessage] = useState('');
-
-    if (userRole !== 'admin') {
-        return (
-            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12 rounded-md"> {/* Added rounded-md */}
-                <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
-                <p className="text-gray-700 mb-6">You must be an **admin** to access this page.</p>
-            </div>
-        );
-    }
-
-    const handleAddPlan = () => {
-        setCurrentEditingPlan(null);
-        setShowEditPlanModal(true);
-    };
-
-    const handleEditPlan = (plan) => {
-        setCurrentEditingPlan(plan);
-        setShowEditPlanModal(true);
-    };
-
-    const handleSavePlan = (updatedPlan) => {
-        // API call to save/update pricing plan in Neon DB
-        handleSavePricingPlan(updatedPlan);
-        setMessage({ type: 'success', text: updatedPlan.id ? `Plan "${updatedPlan.name}" updated successfully (mock)!` : `New plan "${updatedPlan.name}" added successfully (mock)!` });
-        setShowEditPlanModal(false);
-    };
-
-    const handleDeletePlan = (planId, planName) => {
-        setConfirmMessage(`Are you sure you want to delete the plan "${planName}"? This action cannot be undone.`);
-        setConfirmAction(() => () => {
-            // API call to delete pricing plan from Neon DB
-            handleDeletePricingPlan(planId, planName);
-            setMessage({ type: 'success', text: `Plan "${planName}" deleted (mock).` });
-            setShowConfirmModal(false);
-        });
-        setShowConfirmModal(true);
-    };
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center justify-between">
-                <DollarSignIcon size={28} className="mr-3 text-[#964b00]" /> Manage Pricing Plans
-                <button onClick={handleAddPlan} className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 flex items-center">
-                    <PlusCircleIcon size={18} className="mr-2" /> Add New Plan
-                </button>
-            </h2>
-
-            {mockPricingPlans.length === 0 ? (
-                <p className="text-gray-600">No pricing plans defined. Add one to get started!</p>
-            ) : (
-                <div className="overflow-x-auto">
-                    <table className="min-w-full bg-white rounded-lg shadow-md">
-                        <thead>
-                            <tr className="bg-gray-200 text-gray-700 uppercase text-sm leading-normal">
-                                <th className="py-3 px-6 text-left">Plan Name</th>
-                                <th className="py-3 px-6 text-left">Price</th>
-                                <th className="py-3 px-6 text-left">Interval</th>
-                                <th className="py-3 px-6 text-left">Plan Code</th>
-                                <th className="py-3 px-6 text-left">Features</th>
-                                <th className="py-3 px-6 text-center">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="text-gray-600 text-sm font-light">
-                            {mockPricingPlans.map(plan => (
-                                <tr key={plan.id} className="border-b border-gray-200 hover:bg-gray-100">
-                                    <td className="py-3 px-6 text-left font-semibold">{plan.name}</td>
-                                    <td className="py-3 px-6 text-left">{plan.price}</td>
-                                    <td className="py-3 px-6 text-left capitalize">{plan.interval}</td>
-                                    <td className="py-3 px-6 text-left font-mono text-xs">{plan.planCode || 'N/A'}</td>
-                                    <td className="py-3 px-6 text-left">
-                                        <ul className="list-disc list-inside">
-                                            {plan.features.map((feature, idx) => (
-                                                <li key={idx} className="whitespace-nowrap overflow-hidden text-ellipsis">{feature}</li>
-                                            ))}
-                                        </ul>
-                                    </td>
-                                    <td className="py-3 px-6 text-center whitespace-nowrap">
-                                        <button onClick={() => handleEditPlan(plan)} className="px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 text-xs mr-2">Edit</button>
-                                        <button onClick={() => handleDeletePlan(plan.id, plan.name)} className="px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 text-xs">Delete</button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-
-            {showEditPlanModal && (<EditPricingPlanModal plan={currentEditingPlan} onClose={() => setShowEditPlanModal(false)} onSave={handleSavePlan}/>)}
-             {showConfirmModal && (<ConfirmationModal message={confirmMessage} onConfirm={confirmAction} onCancel={() => setShowConfirmModal(false)}/>)}
-        </div>
-    );
-};
-
-const EditPricingPlanModal = ({ plan, onClose, onSave }) => {
-    const [formData, setFormData] = useState({
-        id: plan?.id || null, name: plan?.name || '', price: String(plan?.rawPrice || ''),
-        rawPrice: plan?.rawPrice || '', interval: plan?.interval || 'monthly',
-        planCode: plan?.planCode || '', features: plan?.features?.join('\n') || '',
-    });
-    const [formError, setFormError] = useState('');
+    const { allUsers, fetchAllUsers, handleApproveProvider, handleDeleteUser } = useContext(AppContext);
 
     useEffect(() => {
-        if (plan) {
-            setFormData({
-                id: plan.id, name: plan.name, price: String(plan.rawPrice),
-                rawPrice: plan.rawPrice, interval: plan.interval,
-                planCode: plan.planCode, features: plan.features.join('\n'),
+        fetchAllUsers();
+    }, [fetchAllUsers]);
+
+    const usersRequiringApproval = allUsers.filter(u => u.role === 'provider' && !u.is_provider_approved);
+    // Removed unused 'approvedProviders' and 'regularMembers' variables
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">Admin Tools: User Approvals & Management</h2>
+
+            {/* Providers Awaiting Approval */}
+            <div className="mb-8">
+                <h3 className="text-2xl font-semibold text-gray-800 mb-4">Providers Awaiting Approval ({usersRequiringApproval.length})</h3>
+                {usersRequiringApproval.length === 0 ? (
+                    <p className="text-gray-600">No providers currently awaiting approval.</p>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Specialties</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {usersRequiringApproval.map(user => (
+                                    <tr key={user.id}>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.name}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.email}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.company_name}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.specialties}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                            <button onClick={() => handleApproveProvider(user.id, true)} className="text-green-600 hover:text-green-900 mr-4">Approve</button>
+                                            <button onClick={() => handleDeleteUser(user.id)} className="text-red-600 hover:text-red-900">Delete</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
+            {/* All Users (Providers & Members) */}
+            <div>
+                <h3 className="text-2xl font-semibold text-gray-800 mb-4">All Users ({allUsers.length})</h3>
+                {allUsers.length === 0 ? (
+                    <p className="text-gray-600">No users found in the system.</p>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Provider Status</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Paid Member</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {allUsers.map(user => (
+                                    <tr key={user.id}>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.name}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.email}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">{user.role}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            {user.role === 'provider' ? (
+                                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.is_provider_approved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                                    {user.is_provider_approved ? 'Approved' : 'Pending'}
+                                                </span>
+                                            ) : 'N/A'}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.is_paid_member ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                                                {user.is_paid_member ? 'Yes' : 'No'}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                            {user.role === 'provider' && user.is_provider_approved && (
+                                                <button onClick={() => handleApproveProvider(user.id, false)} className="text-yellow-600 hover:text-yellow-900 mr-4">Unapprove</button>
+                                            )}
+                                            {user.role === 'provider' && !user.is_provider_approved && (
+                                                <button onClick={() => handleApproveProvider(user.id, true)} className="text-green-600 hover:text-green-900 mr-4">Approve</button>
+                                            )}
+                                            {user.role !== 'admin' && ( // Prevent admin from deleting themselves
+                                                <button onClick={() => handleDeleteUser(user.id)} className="text-red-600 hover:text-red-900">Delete</button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+
+const AdminPricingPage = () => {
+    const { pricingPlans, handleSavePricingPlan, handleDeletePricingPlan, setCurrentEditingPlan, currentEditingPlan } = useContext(AppContext);
+
+    const [formState, setFormState] = useState({
+        id: null,
+        name: '',
+        price_display: '',
+        raw_price: '',
+        interval: 'monthly',
+        plan_code: '',
+        features: [],
+        newFeature: '',
+    });
+
+    useEffect(() => {
+        if (currentEditingPlan) {
+            setFormState({
+                id: currentEditingPlan.id,
+                name: currentEditingPlan.name || '',
+                price_display: currentEditingPlan.price_display || '',
+                raw_price: currentEditingPlan.raw_price || '',
+                interval: currentEditingPlan.interval || 'monthly',
+                plan_code: currentEditingPlan.plan_code || '',
+                features: currentEditingPlan.features || [],
+                newFeature: '',
             });
         } else {
-            setFormData({
-                id: null, name: '', price: '', rawPrice: '', interval: 'monthly', planCode: '', features: '',
+            setFormState({
+                id: null, name: '', price_display: '', raw_price: '', interval: 'monthly', plan_code: '', features: [], newFeature: '',
             });
         }
-    }, [plan]);
+    }, [currentEditingPlan]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
+        setFormState(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleFeatureAdd = () => {
+        if (formState.newFeature.trim() !== '') {
+            setFormState(prev => ({
+                ...prev,
+                features: [...prev.features, prev.newFeature.trim()],
+                newFeature: '',
+            }));
+        }
+    };
+
+    const handleFeatureRemove = (index) => {
+        setFormState(prev => ({
+            ...prev,
+            features: prev.features.filter((_, i) => i !== index),
+        }));
     };
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        setFormError('');
-
-        const { name, price, interval, planCode, features } = formData;
-
-        if (!name || !interval || !features) {
-            setFormError('Name, Interval, and Features are required.');
-            return;
-        }
-
-        const parsedPrice = parseFloat(price);
-        if (interval !== 'custom' && (isNaN(parsedPrice) || parsedPrice <= 0)) {
-            setFormError('Price must be a positive number for non-custom plans.');
-            return;
-        }
-        if (interval !== 'custom' && !planCode) {
-            setFormError('Paystack Plan Code is required for non-custom plans.');
-            return;
-        }
-
-
-        const updatedPlan = {
-            id: formData.id, name,
-            price: interval === 'custom' ? 'Contact us for price' : `R${parsedPrice.toFixed(0)}/${interval}`,
-            rawPrice: interval === 'custom' ? 0 : parsedPrice,
-            interval,
-            planCode: interval === 'custom' ? null : planCode,
-            features: features.split('\n').map(f => f.trim()).filter(f => f),
-        };
-
-        onSave(updatedPlan);
-        onClose();
+        handleSavePricingPlan({
+            id: formState.id,
+            name: formState.name,
+            price_display: formState.price_display,
+            raw_price: parseFloat(formState.raw_price),
+            interval: formState.interval,
+            plan_code: formState.plan_code,
+            features: formState.features,
+        });
     };
 
     return (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-screen overflow-y-auto rounded-md"> {/* Added max-h-screen overflow-y-auto and rounded-md */}
-                <h3 className="text-2xl font-bold text-gray-800 mb-6">{plan ? 'Edit Pricing Plan' : 'Add New Pricing Plan'}</h3>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">Admin Tools: Manage Pricing Plans</h2>
+
+            {/* Add/Edit Plan Form */}
+            <div className="mb-8 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                <h3 className="text-xl font-semibold text-gray-700 mb-4">{currentEditingPlan ? 'Edit Pricing Plan' : 'Add New Pricing Plan'}</h3>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planName">Plan Name</label>
-                        <input type="text" id="planName" name="name" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={formData.name} onChange={handleChange} required />
+                        <input type="text" id="planName" name="name" value={formState.name} onChange={handleChange} className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" required />
                     </div>
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planInterval">Interval</label>
-                        <select id="planInterval" name="interval" className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={formData.interval} onChange={handleChange} required >
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="priceDisplay">Price Display (e.g., R199/month)</label>
+                        <input type="text" id="priceDisplay" name="price_display" value={formState.price_display} onChange={handleChange} className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" required />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="rawPrice">Raw Price (numeric, for sorting/calculations)</label>
+                        <input type="number" id="rawPrice" name="raw_price" step="0.01" value={formState.raw_price} onChange={handleChange} className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" required />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="interval">Interval</label>
+                        <select id="interval" name="interval" value={formState.interval} onChange={handleChange} className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
                             <option value="monthly">Monthly</option>
                             <option value="yearly">Yearly</option>
-                            <option value="custom">Custom (Contact us)</option>
+                            <option value="custom">Custom</option>
                         </select>
                     </div>
-                    {formData.interval !== 'custom' && (
-                        <>
-                            <div>
-                                <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planPrice">Price (e.g., 50, 150)</label>
-                                <input type="number" id="planPrice" name="price" step="1" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={formData.price} onChange={handleChange} required={formData.interval !== 'custom'} />
-                            </div>
-                            <div>
-                                <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planCode">Paystack Plan Code</label>
-                                <input type="text" id="planCode" name="planCode" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={formData.planCode} onChange={handleChange} required={formData.interval !== 'custom'} />
-                            </div>
-                        </>
-                    )}
                     <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planFeatures">Features (one per line)</label>
-                        <textarea id="planFeatures" name="features" rows="5" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={formData.features} onChange={handleChange} required></textarea>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="planCode">Paystack Plan Code (if applicable)</label>
+                        <input type="text" id="planCode" name="plan_code" value={formState.plan_code} onChange={handleChange} className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Features</label>
+                        <div className="flex mb-2">
+                            <input type="text" value={formState.newFeature} onChange={(e) => setFormState(prev => ({ ...prev, newFeature: e.target.value }))} className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="Add a new feature"/>
+                            <button type="button" onClick={handleFeatureAdd} className="ml-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600">Add</button>
+                        </div>
+                        <ul className="list-disc list-inside space-y-1">
+                            {formState.features.map((feature, index) => (
+                                <li key={index} className="flex items-center text-gray-700 text-sm">
+                                    {feature}
+                                    <button type="button" onClick={() => handleFeatureRemove(index)} className="ml-2 text-red-500 hover:text-red-700">
+                                        <XIcon size={16} />
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                    <div className="flex justify-end space-x-4">
+                        {currentEditingPlan && (
+                            <button type="button" onClick={() => setCurrentEditingPlan(null)} className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">Cancel Edit</button>
+                        )}
+                        <button type="submit" className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200">
+                            {currentEditingPlan ? 'Save Changes' : 'Add Plan'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            {/* Existing Plans List */}
+            <div>
+                <h3 className="text-2xl font-semibold text-gray-800 mb-4">Existing Pricing Plans</h3>
+                {pricingPlans.length === 0 ? (
+                    <p className="text-gray-600">No pricing plans created yet.</p>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price Display</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Raw Price</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interval</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plan Code</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {pricingPlans.map(plan => (
+                                    <tr key={plan.id}>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{plan.name}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{plan.price_display}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">R{plan.raw_price?.toFixed(2)}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">{plan.interval}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{plan.plan_code || 'N/A'}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                            <button onClick={() => setCurrentEditingPlan(plan)} className="text-blue-600 hover:text-blue-900 mr-4">Edit</button>
+                                            <button onClick={() => handleDeletePricingPlan(plan.id, plan.name)} className="text-red-600 hover:text-red-900">Delete</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const AdminBrandingPage = () => {
+    const { appName, appLogo, handleUpdateBranding, setMessage } = useContext(AppContext);
+    const [newAppName, setNewAppName] = useState(appName);
+    const [newAppLogo, setNewAppLogo] = useState(appLogo);
+    const [formError, setFormError] = useState('');
+
+    useEffect(() => {
+        setNewAppName(appName);
+        setNewAppLogo(appLogo);
+    }, [appName, appLogo]);
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        setFormError('');
+        setMessage(null);
+
+        if (!newAppName && !newAppLogo) {
+            setFormError('Please provide either a new app name or a new logo URL.');
+            return;
+        }
+
+        handleUpdateBranding(newAppName, newAppLogo);
+    };
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">Admin Tools: Manage Branding</h2>
+
+            <div className="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                <h3 className="text-xl font-semibold text-gray-700 mb-4">Current Branding</h3>
+                <div className="mb-4">
+                    <p className="text-gray-700 text-sm font-bold">App Name:</p>
+                    <p className="text-gray-900 text-lg">{appName}</p>
+                </div>
+                <div className="mb-4">
+                    <p className="block text-gray-700 text-sm font-bold mb-2">App Logo:</p>
+                    <img src={appLogo} alt="Current App Logo" className="w-32 h-auto border border-gray-300 rounded-md p-2" onError={(e) => { e.target.onerror = null; e.target.src="https://placehold.co/100x40/964b00/ffffff?text=Logo"; }}/>
+                </div>
+
+                <h3 className="text-xl font-semibold text-gray-700 mb-4 mt-6">Update Branding</h3>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="newAppName">New App Name</label>
+                        <input type="text" id="newAppName" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={newAppName} onChange={(e) => setNewAppName(e.target.value)} placeholder="e.g., Mphakathi Connect" />
+                    </div>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="newAppLogo">New App Logo URL</label>
+                        <input type="url" id="newAppLogo" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={newAppLogo} onChange={(e) => setNewAppLogo(e.target.value)} placeholder="e.g., https://example.com/new_logo.png" />
                     </div>
 
                     {formError && (<p className="text-red-500 text-sm">{formError}</p>)}
 
-                    <div className="flex justify-end space-x-4 mt-6">
-                        <button type="button" onClick={onClose} className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">Cancel</button>
-                        <button type="submit" className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200">{plan ? 'Save Changes' : 'Add Plan'}</button>
+                    <div className="flex justify-end mt-6">
+                        <button type="submit" className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200">Save Branding</button>
                     </div>
                 </form>
             </div>
@@ -2577,123 +2554,40 @@ const EditPricingPlanModal = ({ plan, onClose, onSave }) => {
     );
 };
 
-
-const AdminBrandingPage = () => {
-    const { userRole, appName, appLogo, handleUpdateBranding, setMessage } = useContext(AppContext);
-    const [tempAppName, setTempAppName] = useState(appName);
-    const [tempAppLogo, setTempAppLogo] = useState(appLogo);
-
-    useEffect(() => {
-        setTempAppName(appName);
-        setTempAppLogo(appLogo);
-    }, [appName, appLogo]);
-
-    if (userRole !== 'admin') {
-        return (
-            <div className="bg-white p-6 rounded-lg shadow-md text-center py-12 rounded-md"> {/* Added rounded-md */}
-                <h2 className="text-3xl font-bold text-gray-800 mb-4">Access Denied</h2>
-                <p className="text-gray-700 mb-6">You must be an **admin** to access this page.</p>
-            </div>
-        );
-    }
-
-    const handleSaveBranding = () => {
-        if (tempAppLogo && !/^https?:\/\/.+\..+/.test(tempAppLogo)) {
-            setMessage({ type: 'error', text: 'Please enter a valid URL for the logo (starts with http:// or https://).' });
-            return;
-        }
-        handleUpdateBranding(tempAppName, tempAppLogo);
-        setMessage({ type: 'success', text: 'Branding updated successfully (mock)!' });
-    };
-
-    const handleResetBranding = () => {
-        handleUpdateBranding('Mphakathi Online', 'https://placehold.co/100x40/964b00/ffffff?text=Logo');
-        setMessage({ type: 'info', text: 'Branding reset to default values (mock).' });
-    };
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
-                <PaintbrushIcon size={28} className="mr-3 text-[#964b00]" /> Manage Branding
-            </h2>
-
-            <div className="space-y-6">
-                <div>
-                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="app-name-input">Application Name</label>
-                    <input type="text" id="app-name-input" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={tempAppName} onChange={(e) => setTempAppName(e.target.value)} />
-                </div>
-                <div>
-                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="app-logo-input">Logo Image URL</label>
-                    <input type="url" id="app-logo-input" className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" value={tempAppLogo} onChange={(e) => setTempAppLogo(e.target.value)} placeholder="e.g., https://example.com/logo.png" />
-                    {tempAppLogo && (
-                        <div className="mt-4 p-2 border border-gray-200 rounded-md bg-gray-50 flex items-center justify-center">
-                            <img src={tempAppLogo} alt="Current Logo Preview" className="max-w-xs max-h-24 object-contain rounded-md" onError={(e) => { e.target.onerror = null; e.target.src="https://placehold.co/100x40/cccccc/333333?text=Invalid+URL"; setMessage({ type: 'error', text: 'Invalid logo URL provided.' }); }} />
-                        </div>
-                    )}
-                </div>
-                <div className="flex justify-end space-x-4 mt-6">
-                    <button onClick={handleResetBranding} className="px-6 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200">Reset to Default</button>
-                    <button onClick={handleSaveBranding} className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200">Save Changes</button>
-                </div>
-            </div>
-        </div>
-    );
-};
+// --- Settings Page ---
 
 const SettingsPage = () => {
-    const { userId, userRole, isPaidMember, userProfile, setUserProfileState, setMessage } = useContext(AppContext);
-    // Local state for toggles, reflecting main App state
-    const [emailNotifications, setEmailNotifications] = useState(true);
+    // Removed direct use of setUserProfile and makeAuthenticatedRequest as they are accessed via context directly
+    const { userProfile, setMessage } = useContext(AppContext);
+    const [emailNotifications, setEmailNotifications] = useState(false);
     const [smsNotifications, setSmsNotifications] = useState(false);
+    // Removed unused formError and setFormError
 
-    // Mock toggles for isPaidMember and isProviderApproved for admin access only
-    const handleTogglePaidMember = (e) => {
-        setUserProfileState(prev => ({ ...prev, isPaidMember: e.target.checked }));
-        setMessage({ type: 'info', text: 'Membership status updated (demo only). Upgrade via Pricing to persist.' });
-    };
+    useEffect(() => {
+        // Assume userProfile contains notification preferences
+        // For now, these are just local states, would need DB fields to persist
+        // setEmailNotifications(userProfile?.email_notifications || false);
+        // setSmsNotifications(userProfile?.sms_notifications || false);
+    }, [userProfile]);
 
-    const handleToggleProviderApproved = (e) => {
-        setUserProfileState(prev => ({ ...prev, isProviderApproved: e.target.checked }));
-        setMessage({ type: 'info', text: 'Provider approval status updated (demo only).' });
+    const handleExportData = async () => {
+        // This is a placeholder for a backend export function
+        setMessage({ type: 'info', text: 'Initiating data export... (Feature coming soon)' });
+        // In a real scenario, this would trigger a Netlify Function that
+        // queries the DB and generates a downloadable file (e.g., CSV, JSON).
+        try {
+            // await makeAuthenticatedRequest('/.netlify/functions/export-user-data', 'GET');
+            // setMessage({ type: 'success', text: 'Your data has been prepared for export and download will begin shortly.' });
+        } catch (error) {
+            // setMessage({ type: 'error', text: `Failed to export data: ${error.message}` });
+        }
     };
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
-                <SettingsIcon size={28} className="mr-3 text-[#964b00]" /> Settings
-            </h2>
-            <div className="space-y-4">
-                <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md"> {/* Added rounded-md */}
-                    <h3 className="text-xl font-semibold text-gray-700 mb-2">Account Information</h3>
-                    <p className="text-gray-600">Your unique User ID: <span className="font-mono bg-gray-200 px-2 py-1 rounded-sm text-sm">{userId || 'N/A'}</span></p>
-                    <p className="text-gray-600">Your Role: <span className="font-semibold capitalize">{userRole}</span></p>
-                    {userRole === 'member' && (
-                        <p className="text-gray-600">Membership Status: <span className={`font-semibold ${isPaidMember ? 'text-blue-600' : 'text-yellow-600'}`}>{isPaidMember ? 'Paid' : 'Free'}</span></p>
-                    )}
-                    {userRole === 'provider' && (
-                        <p className="text-gray-600">Provider Status: <span className={`font-semibold ${userProfile.isProviderApproved ? 'text-green-600' : 'text-red-600'}`}>{userProfile.isProviderApproved ? 'Approved' : 'Pending Approval'}</span></p>
-                    )}
-                    <p className="text-gray-600 mt-2">Manage your public profile visibility and contact information from the Profile page.</p>
-
-                    {/* Conditional rendering for admin overrides */}
-                    {process.env.REACT_APP_ENABLE_DEV_FEATURES === 'true' && userRole === 'admin' && (
-                        <div className="mt-4 border-t pt-4 border-gray-300">
-                            <h4 className="text-lg font-semibold text-gray-700 mb-2">Admin Overrides (Demo)</h4>
-                            <div className="mt-2 flex items-center">
-                                <input type="checkbox" id="adminPaidMemberToggle" className="mr-2" checked={isPaidMember} onChange={handleTogglePaidMember}/>
-                                <label htmlFor="adminPaidMemberToggle" className="text-gray-700">Toggle Paid Member Status for Current User</label>
-                            </div>
-                            {userRole === 'provider' && (
-                                <div className="mt-2 flex items-center">
-                                    <input type="checkbox" id="adminProviderApprovedToggle" className="mr-2" checked={userProfile.isProviderApproved || false} onChange={handleToggleProviderApproved}/>
-                                    <label htmlFor="adminProviderApprovedToggle" className="text-gray-700">Toggle Provider Approved Status for Current User</label>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                </div>
-                <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md"> {/* Added rounded-md */}
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">Settings</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md">
                     <h3 className="text-xl font-semibold text-gray-700 mb-2">Notification Preferences</h3>
                     <p className="text-gray-600">Configure how you receive alerts for new activity.</p>
                     <div className="mt-3 flex items-center">
@@ -2708,7 +2602,7 @@ const SettingsPage = () => {
                 <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md"> {/* Added rounded-md */}
                     <h3 className="text-xl font-semibold text-gray-700 mb-2">Data Management</h3>
                     <p className="text-gray-600">Review and manage your data.</p>
-                    <button className="mt-3 px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 transition-colors duration-200">
+                    <button onClick={handleExportData} className="mt-3 px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 transition-colors duration-200">
                         Export My Data
                     </button>
                 </div>
