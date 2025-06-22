@@ -45,7 +45,7 @@ const ConfirmationModal = ({ message, onConfirm, onCancel, confirmText = "Confir
 // =========================================================================
 const App = () => {
     // Auth0 hooks for authentication state and token retrieval
-    const { user, isAuthenticated, getAccessTokenSilently, loginWithRedirect, logout } = useAuth0(); // Removed authLoading as it was unused
+    const { user, isAuthenticated, getAccessTokenSilently, loginWithRedirect, logout } = useAuth0();
 
     // --- State Management for Application Data and UI ---
     const [userProfile, setUserProfile] = useState(null); // Will store DB profile, not mock
@@ -440,7 +440,8 @@ const App = () => {
             setAppName(newName);
             setAppLogo(newLogo);
             setMessage({ type: 'success', text: 'Branding updated successfully!' });
-        } catch (error) {
+        }
+        catch (error) {
             // Error handled by makeAuthenticatedRequest
         }
     };
@@ -1201,11 +1202,6 @@ const MemberDashboardPage = () => {
 
 // --- General Pages ---
 
-// RegistrationPage - This component's direct registration logic will largely be removed
-// as Auth0 handles the primary registration flow. This component might become
-// an onboarding form after Auth0 registration if more details are needed immediately.
-// Removed this component entirely as it's not currently used and causes unused variable warnings.
-
 const BecomeProviderModal = ({ onClose, onRegister }) => {
     const { userProfile, setMessage } = useContext(AppContext);
     const [companyName, setCompanyName] = useState(userProfile?.company_name || ''); // Use snake_case
@@ -1803,7 +1799,7 @@ const PostProblemModal = ({ onClose, onSave, isPaidMember }) => {
     const [location, setLocation] = useState('');
     const [estimatedBudget, setEstimatedBudget] = useState('');
     const [formError, setFormError] = useState('');
-    const { userProfile, setMessage } = useContext(AppContext); // Removed unused userRole
+    const { userProfile, setMessage } = useContext(AppContext);
 
     const handleSubmit = (e) => {
         e.preventDefault();
@@ -2223,7 +2219,6 @@ const AdminToolsPage = () => {
     }, [fetchAllUsers]);
 
     const usersRequiringApproval = allUsers.filter(u => u.role === 'provider' && !u.is_provider_approved);
-    // Removed unused 'approvedProviders' and 'regularMembers' variables
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-md">
@@ -2557,11 +2552,9 @@ const AdminBrandingPage = () => {
 // --- Settings Page ---
 
 const SettingsPage = () => {
-    // Removed direct use of setUserProfile and makeAuthenticatedRequest as they are accessed via context directly
     const { userProfile, setMessage } = useContext(AppContext);
     const [emailNotifications, setEmailNotifications] = useState(false);
     const [smsNotifications, setSmsNotifications] = useState(false);
-    // Removed unused formError and setFormError
 
     useEffect(() => {
         // Assume userProfile contains notification preferences
