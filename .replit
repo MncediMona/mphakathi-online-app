@@ -42,7 +42,7 @@ args = "npm install"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm start"
+args = "BROWSER=none HOST=0.0.0.0 PORT=3000 npm start"
 
 [[workflows.workflow]]
 name = "Build for Production"

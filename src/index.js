@@ -37,6 +37,8 @@ const providerConfig = {
     // Optionally include audience if you are also calling a secured API
     ...(config.audience ? { audience: config.audience } : null),
   },
+  cacheLocation: 'localstorage', // Store tokens in localStorage instead of memory
+  useRefreshTokens: true, // Enable refresh tokens for better session management
 };
 
 // Get the root element where your React application will be mounted.
