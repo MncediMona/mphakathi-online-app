@@ -22,7 +22,7 @@ export function getConfig() {
 const config = {
   domain: process.env.REACT_APP_AUTH0_DOMAIN || "dev-2yxylzdtf4dqt51i.us.auth0.com",
   clientId: process.env.REACT_APP_AUTH0_CLIENT_ID || "lOnIDcw4GQKk3dEEDec74F7buYO56rH8",
-  audience: process.env.REACT_APP_AUTH0_AUDIENCE || "https://api.mphakathi-online.com"
+  audience: process.env.REACT_APP_AUTH0_API_AUDIENCE || "https://api.mphakathi-online.com"
 };
 
 export default config;
