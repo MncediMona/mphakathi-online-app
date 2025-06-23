@@ -1,0 +1,39 @@
+# .replit - Replit workspace configuration
+# This file tells Replit how to set up and run your development environment.
+
+# Specify Node.js version 22
+modules = ["nodejs-22", "web", "python-3.12"] # Changed nodejs-20 to nodejs-22
+
+# Commands to run on startup
+# We want to:
+# 1. Install netlify-cli globally (if not already)
+# 2. Install project dependencies (npm install)
+# 3. Run netlify dev as the main process
+run = "npm install -g netlify-cli && npm install && netlify dev" # Changed from "npm run dev"
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+# The deployment run command should also use netlify dev or a production build command
+# For development in Replit, the 'run' command above handles starting.
+# If you plan to deploy directly from Replit, this would need to change to 'npm run build'
+# For now, let's keep it aligned with the dev setup for testing.
+run = ["sh", "-c", "npm install -g netlify-cli && npm install && netlify dev"]
+
+
+# Port Configuration:
+# - localPort 8888 is where Netlify Dev runs its proxy (serving both frontend and functions)
+# - externalPort 80 is Replit's default public port, so map 8888 to 80 for easy access.
+# - localPort 3000 is your React app's dev server, which Netlify Dev will proxy internally.
+#   It doesn't need to be publicly exposed by Replit, so we mark it as private.
+
+[[ports]]
+localPort = 8888 # Netlify Dev's default port
+externalPort = 80 # Replit's default public web port
+visibility = "public"
+default = true # This makes it the primary URL Replit opens
+
+[[ports]]
+localPort = 3000 # Your React app's dev server (proxied by Netlify Dev)
+visibility = "private" # Not directly exposed to the public
