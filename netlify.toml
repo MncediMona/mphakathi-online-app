@@ -4,8 +4,9 @@
   functions = "netlify/functions" # Assuming your functions are in a 'netlify/functions' directory
 
 [dev]
-  command = "npm start" # Or "react-scripts start" if that's your dev command
-  port = 3000 # Or whatever port your React dev server typically runs on
-  publish = "build"
+  command = "npm start"
+  targetPort = 3000
+  publish = "public" # <-- CHANGE THIS LINE from "build" to "public"
   functions = "netlify/functions"
-  framework = "#custom" # This tells Netlify to let your local dev command handle the frontend
+  framework = "#custom"
+  host = "0.0.0.0"

@@ -3,17 +3,21 @@ import {
   HomeIcon, UserIcon, FileTextIcon, PackageIcon,
   ShieldCheckIcon, SettingsIcon, LogOutIcon, BriefcaseIcon, PlusCircleIcon,
   EditIcon, CheckCircleIcon, XCircleIcon, DollarSignIcon, CheckCircle2Icon,
-  PaintbrushIcon, MenuIcon, XIcon // Added MenuIcon and XIcon for mobile sidebar
+  PaintbrushIcon, MenuIcon, XIcon
 } from 'lucide-react';
-import { useAuth0 } from '@auth0/auth0-react'; // Import Auth0 hook
-// Removed 'usePaystackPayment' as it's not being actively used with the current payment flow
+import { useAuth0 } from '@auth0/auth0-react';
 
-// AppContext definition - This context will now provide Auth0-derived user info and API functions
+// AppContext definition
 export const AppContext = createContext(null);
 
 // =========================================================================
 // GLOBAL CONSTANTS AND HELPER FUNCTIONS GO HERE:
 // =========================================================================
+
+// Define API Base URL dynamically based on environment
+const API_BASE_URL = process.env.NODE_ENV === 'development'
+    ? 'http://localhost:8888' // For `netlify dev` in Codespaces or local machine
+    : ''; // For Netlify deployment, use relative path
 
 // Custom Confirmation Modal - Reusable UI for confirmations
 const ConfirmationModal = ({ message, onConfirm, onCancel, confirmText = "Confirm", cancelText = "Cancel" }) => {
@@ -82,7 +86,7 @@ const App = () => {
 
     // --- Utility Function for API Calls (DRY principle) ---
     // Wrapped in useCallback to make it stable for useEffect dependencies
-    const makeAuthenticatedRequest = useCallback(async (url, method, body = null) => {
+    const makeAuthenticatedRequest = useCallback(async (path, method, body = null) => {
         setLoading(true);
         try {
             const accessToken = await getAccessTokenSilently({
@@ -102,6 +106,8 @@ const App = () => {
                 options.body = JSON.stringify(body);
             }
 
+            // Construct the full URL using API_BASE_URL
+            const url = `${API_BASE_URL}/.netlify/functions${path}`;
             const response = await fetch(url, options);
             const responseData = await response.json();
 
@@ -110,7 +116,7 @@ const App = () => {
             }
             return responseData;
         } catch (error) {
-            console.error(`API Call Error (${method} ${url}):`, error);
+            console.error(`API Call Error (${method} ${path}):`, error);
             setMessage({ type: 'error', text: `Operation failed: ${error.message}` });
             throw error; // Re-throw to allow specific error handling in calling functions
         } finally {
@@ -136,7 +142,7 @@ const App = () => {
                 // Call your Netlify Function to get or create the user's database profile
                 // The `makeAuthenticatedRequest` handles token retrieval and error logging
                 const profileData = await makeAuthenticatedRequest(
-                    '/.netlify/functions/get-or-create-user-profile',
+                    '/get-or-create-user-profile', // Path only, base URL added inside makeAuthenticatedRequest
                     'POST',
                     { auth0Id: user.sub, email: user.email, name: user.name }
                 );
@@ -160,7 +166,8 @@ const App = () => {
     useEffect(() => {
         const fetchBranding = async () => {
             try {
-                const response = await fetch('/.netlify/functions/get-branding');
+                // Prepend API_BASE_URL to the function path
+                const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-branding`);
                 if (!response.ok) {
                     const errorData = await response.json();
                     throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
@@ -180,7 +187,8 @@ const App = () => {
     useEffect(() => {
         const fetchPlans = async () => {
             try {
-                const response = await fetch('/.netlify/functions/get-pricing-plans');
+                // Prepend API_BASE_URL to the function path
+                const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-pricing-plans`);
                 if (!response.ok) {
                     const errorData = await response.json();
                     throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
@@ -199,7 +207,8 @@ const App = () => {
     const fetchPublicProblems = useCallback(async () => {
         setLoading(true);
         try {
-            const response = await fetch('/.netlify/functions/get-problems');
+            // Prepend API_BASE_URL to the function path
+            const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-problems`);
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
@@ -218,7 +227,7 @@ const App = () => {
         if (!userProfile) return;
         setLoading(true);
         try {
-            const data = await makeAuthenticatedRequest('/.netlify/functions/get-my-problems', 'GET');
+            const data = await makeAuthenticatedRequest('/get-my-problems', 'GET');
             setProblems(data); // Re-use problems state for my problems
         } catch (error) {
             console.error('Error fetching my problems:', error);
@@ -233,7 +242,7 @@ const App = () => {
             return;
         }
         try {
-            await makeAuthenticatedRequest('/.netlify/functions/post-problem', 'POST', problemData);
+            await makeAuthenticatedRequest('/post-problem', 'POST', problemData);
             setMessage({ type: 'success', text: 'Problem posted successfully! It will be visible after admin approval.' });
             setShowPostProblemModal(false);
             fetchPublicProblems(); // Refresh public problems list
@@ -245,7 +254,7 @@ const App = () => {
     const handleDeleteProblem = async (problemId) => {
         triggerConfirmation('Are you sure you want to delete this problem and all associated quotes? This action cannot be undone.', async () => {
             try {
-                await makeAuthenticatedRequest('/.netlify/functions/delete-problem', 'DELETE', { problemId });
+                await makeAuthenticatedRequest('/delete-problem', 'DELETE', { problemId });
                 setMessage({ type: 'success', text: 'Problem deleted successfully.' });
                 fetchPublicProblems(); // Refresh public problems list
                 fetchMyProblems(); // Refresh my problems list
@@ -258,8 +267,8 @@ const App = () => {
 
     const handleEditProblem = async (problemId, updatedData) => {
         try {
-            await makeAuthenticatedRequest('/.netlify/functions/update-problem', 'PUT', { problemId, ...updatedData });
-            setMessage({ type: 'success', text: 'Problem updated successfully.' });
+            await makeAuthenticatedRequest('/update-problem', 'PUT', { problemId, ...updatedData });
+            setMessage({ type: 'success', text: 'Problem updated successfully!' });
             setEditingProblem(null); // Close modal if it was open
             fetchPublicProblems(); // Refresh
             fetchMyProblems(); // Refresh
@@ -270,7 +279,7 @@ const App = () => {
 
     const handleApproveProblem = async (problemId) => {
         try {
-            await makeAuthenticatedRequest('/.netlify/functions/update-problem', 'PUT', { problemId, is_approved: true, status: 'open' });
+            await makeAuthenticatedRequest('/update-problem', 'PUT', { problemId, is_approved: true, status: 'open' });
             setMessage({ type: 'success', text: 'Problem approved and made public.' });
             fetchPublicProblems(); // Refresh
             fetchMyProblems(); // Refresh (in case it's in their list)
@@ -282,7 +291,7 @@ const App = () => {
     const handleMarkProblemResolved = async (problemId) => {
         triggerConfirmation("Are you sure you want to mark this problem as resolved?", async () => {
             try {
-                await makeAuthenticatedRequest('/.netlify/functions/update-problem', 'PUT', { problemId, status: 'resolved' });
+                await makeAuthenticatedRequest('/update-problem', 'PUT', { problemId, status: 'resolved' });
                 setMessage({ type: 'success', text: 'Problem marked as resolved.' });
                 fetchPublicProblems();
                 fetchMyProblems();
@@ -298,7 +307,7 @@ const App = () => {
         if (!userProfile || userRole !== 'provider') return;
         setLoading(true);
         try {
-            const data = await makeAuthenticatedRequest('/.netlify/functions/get-my-quotes', 'GET');
+            const data = await makeAuthenticatedRequest('/get-my-quotes', 'GET');
             // This assumes get-my-quotes returns the necessary problemTitle/Status
             setProblems(prev => { // Update quotes within the problems array to reflect changes
                 return prev.map(p => {
@@ -320,7 +329,7 @@ const App = () => {
             return;
         }
         try {
-            await makeAuthenticatedRequest('/.netlify/functions/submit-quote', 'POST', {
+            await makeAuthenticatedRequest('/submit-quote', 'POST', {
                 problemId,
                 amount: quoteData.proposedBudget,
                 details: quoteData.motivation,
@@ -347,7 +356,7 @@ const App = () => {
                 return;
             }
             try {
-                await makeAuthenticatedRequest('/.netlify/functions/accept-quote', 'PUT', { problemId, quoteId });
+                await makeAuthenticatedRequest('/accept-quote', 'PUT', { problemId, quoteId });
                 setMessage({ type: 'success', text: 'Quote accepted! Problem marked as closed.' });
                 fetchPublicProblems(); // Refresh problem status
                 fetchMyProblems(); // Refresh my requests
@@ -362,7 +371,7 @@ const App = () => {
     const handleWithdrawQuote = async (problemId, quoteId) => {
         triggerConfirmation('Are you sure you want to withdraw this quote?', async () => {
             try {
-                await makeAuthenticatedRequest('/.netlify/functions/withdraw-quote', 'DELETE', { quoteId });
+                await makeAuthenticatedRequest('/withdraw-quote', 'DELETE', { quoteId });
                 setMessage({ type: 'success', text: 'Quote withdrawn successfully.' });
                 fetchMyQuotes(); // Refresh my quotes list
                 fetchPublicProblems(); // Update problem's quotes list
@@ -375,7 +384,7 @@ const App = () => {
 
     const handleEditQuote = async (problemId, quoteId, updatedQuoteData) => {
         try {
-            await makeAuthenticatedRequest('/.netlify/functions/update-quote', 'PUT', { quoteId, problemId, ...updatedQuoteData });
+            await makeAuthenticatedRequest('/update-quote', 'PUT', { quoteId, problemId, ...updatedQuoteData });
             setMessage({ type: 'success', text: 'Quote updated successfully!' });
             setEditingQuote(null);
             fetchMyQuotes(); // Refresh my quotes
@@ -420,10 +429,6 @@ const App = () => {
 
         // Simulate opening Paystack payment link
         if (planDetails.plan_code) { // Use snake_case for plan_code
-            // For production, you'd use Paystack's Checkout method via their JS SDK or initiate from backend
-            // For now, let's just open the link (which isn't ideal for production but demonstrates the flow)
-            // In a real app, this would involve a backend call to initiate a transaction and return a checkout URL
-            // OR use a React Paystack hook/component with `config` object
             const paystackPaymentLink = `https://paystack.com/pay/${planDetails.plan_code}`;
             window.open(paystackPaymentLink, '_blank');
             setMessage({type: 'info', text: 'Redirecting to Paystack for payment. Your membership will be updated upon successful payment confirmation!'});
@@ -436,7 +441,7 @@ const App = () => {
     // --- Branding Management (manage:branding) ---
     const handleUpdateBranding = async (newName, newLogo) => {
         try {
-            await makeAuthenticatedRequest('/.netlify/functions/save-branding', 'PUT', { app_name: newName, app_logo_url: newLogo });
+            await makeAuthenticatedRequest('/save-branding', 'PUT', { app_name: newName, app_logo_url: newLogo });
             setAppName(newName);
             setAppLogo(newLogo);
             setMessage({ type: 'success', text: 'Branding updated successfully!' });
@@ -450,12 +455,12 @@ const App = () => {
     const handleSavePricingPlan = async (planData) => {
         try {
             const method = planData.id ? 'PUT' : 'POST'; // If planData has an ID, it's an update
-            const endpoint = '/.netlify/functions/save-pricing-plan';
+            const endpoint = '/save-pricing-plan';
             await makeAuthenticatedRequest(endpoint, method, planData);
             setMessage({ type: 'success', text: planData.id ? `Plan "${planData.name}" updated successfully!` : `New plan "${planData.name}" added successfully!` });
             setCurrentEditingPlan(null); // Close edit modal
             // Re-fetch pricing plans after saving/updating
-            const response = await fetch('/.netlify/functions/get-pricing-plans');
+            const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-pricing-plans`);
             if (response.ok) {
                 const data = await response.json();
                 setPricingPlans(data);
@@ -468,10 +473,10 @@ const App = () => {
     const handleDeletePricingPlan = (planId, planName) => {
         triggerConfirmation(`Are you sure you want to delete the plan "${planName}"? This action cannot be undone.`, async () => {
             try {
-                await makeAuthenticatedRequest('/.netlify/functions/delete-pricing-plan', 'DELETE', { id: planId });
+                await makeAuthenticatedRequest('/delete-pricing-plan', 'DELETE', { id: planId });
                 setMessage({ type: 'success', text: `Plan "${planName}" deleted.` });
                 // Re-fetch pricing plans after deletion
-                const response = await fetch('/.netlify/functions/get-pricing-plans');
+                const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-pricing-plans`);
                 if (response.ok) {
                     const data = await response.json();
                     setPricingPlans(data);
@@ -488,7 +493,7 @@ const App = () => {
         if (userRole !== 'admin') return;
         setLoading(true);
         try {
-            const data = await makeAuthenticatedRequest('/.netlify/functions/get-all-users', 'GET');
+            const data = await makeAuthenticatedRequest('/get-all-users', 'GET');
             setAllUsers(data);
         } catch (error) {
             console.error('Error fetching all users:', error);
@@ -499,7 +504,7 @@ const App = () => {
 
     const handleApproveProvider = async (providerId, isApproved) => {
         try {
-            await makeAuthenticatedRequest('/.netlify/functions/approve-provider', 'PUT', { providerId, isApproved });
+            await makeAuthenticatedRequest('/approve-provider', 'PUT', { providerId, isApproved });
             setMessage({ type: 'success', text: `Provider status updated for ${allUsers.find(u => u.id === providerId)?.name || 'user'}.` });
             fetchAllUsers(); // Refresh user list
         } catch (error) {
@@ -510,7 +515,7 @@ const App = () => {
     const handleDeleteUser = (userIdToDelete) => { // Renamed from handleDeleteProvider to be more general
         triggerConfirmation("Are you sure you want to delete this user? This will remove their profile and cannot be undone.", async () => {
             try {
-                await makeAuthenticatedRequest('/.netlify/functions/delete-user', 'DELETE', { userIdToDelete }); // Call the new delete-user function
+                await makeAuthenticatedRequest('/delete-user', 'DELETE', { userIdToDelete }); // Call the new delete-user function
                 setMessage({ type: 'success', text: `User ${allUsers.find(u => u.id === userIdToDelete)?.name || 'user'} deleted.` });
                 fetchAllUsers(); // Refresh list
                 setShowConfirmationModal(false);
@@ -857,7 +862,7 @@ const App = () => {
                         // This will trigger an update to the user's role on the backend
                         onRegister={async (formData) => {
                              try {
-                                const updatedProfile = await makeAuthenticatedRequest('/.netlify/functions/update-user-profile', 'PUT', {
+                                const updatedProfile = await makeAuthenticatedRequest('/update-user-profile', 'PUT', {
                                     ...userProfile, // Keep existing profile data
                                     role: 'provider',
                                     is_provider_approved: false, // Set to false initially
@@ -1204,7 +1209,7 @@ const MemberDashboardPage = () => {
 
 const BecomeProviderModal = ({ onClose, onRegister }) => {
     const { userProfile, setMessage } = useContext(AppContext);
-    const [companyName, setCompanyName] = useState(userProfile?.company_name || ''); // Use snake_case
+    const [companyName, setCompanyName] = useState(userProfile?.company_name || '');
     const [specialties, setSpecialties] = useState(userProfile?.specialties || '');
     const [bio, setBio] = useState(userProfile?.bio || '');
     const [formError, setFormError] = useState('');
@@ -1227,8 +1232,6 @@ const BecomeProviderModal = ({ onClose, onRegister }) => {
             return;
         }
 
-        // Call the parent's onRegister which is now the App's handleBecomeProvider function
-        // It directly makes the API call to update the user profile
         await onRegister({ companyName, specialties, bio });
         onClose();
     };
@@ -1265,7 +1268,7 @@ const BecomeProviderModal = ({ onClose, onRegister }) => {
 };
 
 const PricingPage = () => {
-    const { setSelectedPlan, setMessage, pricingPlans } = useContext(AppContext); // Use real pricingPlans
+    const { setSelectedPlan, setMessage, pricingPlans } = useContext(AppContext);
 
     const handleSelectPlan = (plan) => {
         if (plan.interval === 'custom') {
@@ -1288,7 +1291,7 @@ const PricingPage = () => {
                     pricingPlans.map(plan => (
                         <div key={plan.id} className="border border-gray-200 rounded-lg p-6 flex flex-col items-center text-center shadow-md hover:shadow-lg transition-shadow duration-300">
                             <h3 className="text-2xl font-bold text-[#964b00] mb-2">{plan.name}</h3>
-                            <p className="text-4xl font-extrabold text-gray-900 mb-4">{plan.price_display}</p> {/* Use price_display */}
+                            <p className="text-4xl font-extrabold text-gray-900 mb-4">{plan.price_display}</p>
                             <ul className="text-gray-700 space-y-2 mb-6 text-left w-full">
                                 {plan.features.map((feature, index) => (
                                     <li key={index} className="flex items-center">
@@ -1318,7 +1321,6 @@ const SignUpFormModal = ({ plan, onClose, onCompleteSignUp }) => {
     const { userProfile, setMessage } = useContext(AppContext);
     const [name, setName] = useState(userProfile?.name || '');
     const [email, setEmail] = useState(userProfile?.email || '');
-    // No password input needed here, as Auth0 handles initial signup/login credentials
     const [phone, setPhone] = useState(userProfile?.phone || '');
     const [address, setAddress] = useState(userProfile?.address || '');
     const [formError, setFormError] = useState('');
@@ -1337,7 +1339,6 @@ const SignUpFormModal = ({ plan, onClose, onCompleteSignUp }) => {
         setFormError('');
         setMessage(null);
 
-        // Only update profile information here. Payment is external via Paystack redirect.
         if (!name || !email) {
             setFormError('Name and Email are required.');
             return;
@@ -1347,12 +1348,8 @@ const SignUpFormModal = ({ plan, onClose, onCompleteSignUp }) => {
             return;
         }
 
-        // Update user's profile with potentially new contact info before payment if needed
-        // This is a profile update, not a full registration
         try {
-            await onCompleteSignUp(plan); // Pass plan directly to the parent handler
-            // The actual user profile update for `is_paid_member` will happen via the Paystack webhook
-            // after successful payment.
+            await onCompleteSignUp(plan);
             onClose();
         } catch (error) {
             setFormError(`Failed to initiate payment: ${error.message}`);
@@ -1402,7 +1399,7 @@ const ProfilePage = () => {
     const { userProfile, setUserProfile, setMessage, makeAuthenticatedRequest } = useContext(AppContext);
     const [editMode, setEditMode] = useState(false);
     const [formData, setFormData] = useState({
-        name: '', email: '', phone: '', bio: '', address: '', company_name: '', specialties: '', // Use snake_case
+        name: '', email: '', phone: '', bio: '', address: '', company_name: '', specialties: '',
     });
 
     useEffect(() => {
@@ -1422,8 +1419,8 @@ const ProfilePage = () => {
 
     const handleSave = async () => {
         try {
-            const updatedProfile = await makeAuthenticatedRequest('/.netlify/functions/update-user-profile', 'PUT', formData);
-            setUserProfile(updatedProfile); // Update global user profile state
+            const updatedProfile = await makeAuthenticatedRequest('/update-user-profile', 'PUT', formData);
+            setUserProfile(updatedProfile);
             setEditMode(false);
             setMessage({ type: 'success', text: 'Profile updated successfully!' });
         } catch (error) {
@@ -1519,7 +1516,7 @@ const ProblemListPage = ({ setShowPostProblemModal }) => {
         if (filterLocation !== 'All' && problem.location !== filterLocation) {
             return false;
         }
-        const budget = problem.estimated_budget; // Use snake_case for DB field
+        const budget = problem.estimated_budget;
         if (minBudget && budget < parseFloat(minBudget)) {
             return false;
         }
@@ -1530,7 +1527,7 @@ const ProblemListPage = ({ setShowPostProblemModal }) => {
             return false;
         }
         return true;
-    }).sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()); // Use created_at
+    }).sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-md">
@@ -1593,10 +1590,14 @@ const ProblemListPage = ({ setShowPostProblemModal }) => {
 
 const ProblemCard = ({ problem, userRole, onNavigate }) => {
     const handleViewDetails = () => {
-        // Use history API or context to navigate to detail page
         window.location.hash = `problem-detail/${problem.id}`;
         onNavigate('problem-detail');
     };
+
+    // Safely access estimated_budget and apply toFixed
+    const displayBudget = problem.estimated_budget != null && typeof problem.estimated_budget === 'number'
+        ? `R${problem.estimated_budget.toFixed(2)}`
+        : 'N/A';
 
     return (
         <div className="bg-gray-50 p-4 rounded-lg shadow-sm border border-gray-200 rounded-md">
@@ -1604,7 +1605,7 @@ const ProblemCard = ({ problem, userRole, onNavigate }) => {
             <p className="text-gray-700 mb-2 text-sm truncate">{problem.description}</p>
             <p className="text-gray-600 font-medium text-xs">Category: {problem.category || 'General'}</p>
             <p className="text-gray-600 font-medium text-xs">Location: {problem.location || 'N/A'}</p>
-            <p className="text-gray-600 font-medium text-xs">Budget: R{problem.estimated_budget?.toFixed(2) || 'N/A'}</p>
+            <p className="text-gray-600 font-medium text-xs">Budget: {displayBudget}</p>
             <p className="text-gray-600 font-medium text-xs">Status: <span className="capitalize">{problem.status}</span></p>
             <p className="text-gray-500 text-xs mt-1">Posted: {new Date(problem.created_at)?.toLocaleDateString()}</p>
             {!problem.is_approved && (
@@ -1630,7 +1631,7 @@ const ProblemDetailPage = ({ problem, onClose, onSave, onAcceptQuote, onDeletePr
 
     const [formData, setFormData] = useState({
         title: problem.title, description: problem.description, category: problem.category,
-        location: problem.location, estimated_budget: problem.estimated_budget, // Use snake_case
+        location: problem.location, estimated_budget: problem.estimated_budget,
     });
 
     useEffect(() => {
@@ -1650,18 +1651,15 @@ const ProblemDetailPage = ({ problem, onClose, onSave, onAcceptQuote, onDeletePr
         onSave(problem.id, formData);
     };
 
-    // Corrected the problematic line:
     const handleEditQuoteClick = (quote) => {
         setEditingQuote(quote);
     };
 
 
-    const isRequester = userProfile?.id === problem.requester_id; // Use DB ID
+    const isRequester = userProfile?.id === problem.requester_id;
     const isProblemOpen = problem.status === 'open';
-    // Removed unused 'hasAcceptedQuote' variable
 
-
-    const triggerConfirmationLocal = (message, action) => { // Renamed to avoid conflict with context
+    const triggerConfirmationLocal = (message, action) => {
         setConfirmModalMessage(message);
         setConfirmModalAction(() => action);
         setShowConfirmModalLocal(true);
@@ -1669,6 +1667,11 @@ const ProblemDetailPage = ({ problem, onClose, onSave, onAcceptQuote, onDeletePr
 
     // Determine if this component is rendered as a modal or a page based on 'onClose' prop
     const isModal = typeof onClose === 'function';
+
+    // Safely access estimated_budget for display in ProblemDetailPage
+    const displayBudget = problem.estimated_budget != null && typeof problem.estimated_budget === 'number'
+        ? problem.estimated_budget.toFixed(2)
+        : 'N/A';
 
     return (
         <div className={`bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl overflow-y-auto max-h-[90vh] rounded-md ${isModal ? 'fixed inset-0 flex items-center justify-center z-50 bg-gray-600 bg-opacity-50' : ''}`}>
@@ -1696,7 +1699,10 @@ const ProblemDetailPage = ({ problem, onClose, onSave, onAcceptQuote, onDeletePr
                         </div>
                         <div className="mb-4">
                             <label htmlFor="edit-problem-budget" className="block text-sm font-medium text-gray-700">Estimated Budget (R)</label>
+                            {/* Safely display the budget here as well */}
                             <input type="number" id="edit-problem-budget" name="estimated_budget" value={formData.estimated_budget} step="0.01" onChange={handleChange} readOnly={userRole !== 'admin' && problem.requester_id !== userProfile?.id} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 sm:text-sm" />
+                            {/* Display for non-editable */}
+                            {!isModal && (userRole === 'admin' || problem.requester_id === userProfile?.id) ? null : <p className="text-gray-900 text-lg">R{displayBudget}</p>}
                         </div>
                     </div>
                     <div className="mb-4">
@@ -1817,8 +1823,8 @@ const PostProblemModal = ({ onClose, onSave, isPaidMember }) => {
 
         const newProblem = {
             title, description, category, location,
-            estimated_budget: parseFloat(estimatedBudget), // Use snake_case
-            requester_id: userProfile.id, // Use DB ID
+            estimated_budget: parseFloat(estimatedBudget),
+            requester_id: userProfile.id,
             status: 'open',
             is_approved: false, // Will require admin approval
         };
@@ -2012,7 +2018,7 @@ const MyRequestsPage = () => {
 
     useEffect(() => {
         fetchMyProblems();
-    }, [fetchMyProblems]); // Depend on the fetch function from context
+    }, [fetchMyProblems]);
 
     const myProblems = problems.filter(p => p.requester_id === userProfile?.id)
                                .sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -2040,7 +2046,8 @@ const MyRequestsPage = () => {
                             <p className="text-gray-700 mb-2">{problem.description}</p>
                             <p className="text-gray-600 text-sm">Category: {problem.category}</p>
                             <p className="text-gray-600 text-sm">Location: {problem.location}</p>
-                            <p className="text-gray-600 text-sm">Budget: R{problem.estimated_budget?.toFixed(2)}</p>
+                            {/* Safely display budget */}
+                            <p className="text-gray-600 text-sm">Budget: {problem.estimated_budget != null && typeof problem.estimated_budget === 'number' ? `R${problem.estimated_budget.toFixed(2)}` : 'N/A'}</p>
                             <p className="text-gray-500 text-xs mt-1">Posted: {new Date(problem.created_at)?.toLocaleDateString()}</p>
 
                             <div className="mt-4 flex space-x-2">
@@ -2135,7 +2142,6 @@ const MyQuotesPage = () => {
     }, [userProfile, fetchMyQuotes]);
 
     useEffect(() => {
-        // Process global problems state to get detailed quotes for the current provider
         if (userProfile?.role === 'provider' && problems.length > 0) {
             const providerQuotes = [];
             problems.forEach(problem => {
@@ -2566,10 +2572,8 @@ const SettingsPage = () => {
     const handleExportData = async () => {
         // This is a placeholder for a backend export function
         setMessage({ type: 'info', text: 'Initiating data export... (Feature coming soon)' });
-        // In a real scenario, this would trigger a Netlify Function that
-        // queries the DB and generates a downloadable file (e.g., CSV, JSON).
         try {
-            // await makeAuthenticatedRequest('/.netlify/functions/export-user-data', 'GET');
+            // await makeAuthenticatedRequest('/export-user-data', 'GET');
             // setMessage({ type: 'success', text: 'Your data has been prepared for export and download will begin shortly.' });
         } catch (error) {
             // setMessage({ type: 'error', text: `Failed to export data: ${error.message}` });
@@ -2592,7 +2596,7 @@ const SettingsPage = () => {
                         <label htmlFor="sms-notifications" className="text-gray-700">SMS notifications (coming soon)</label>
                     </div>
                 </div>
-                <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md"> {/* Added rounded-md */}
+                <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md">
                     <h3 className="text-xl font-semibold text-gray-700 mb-2">Data Management</h3>
                     <p className="text-gray-600">Review and manage your data.</p>
                     <button onClick={handleExportData} className="mt-3 px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 transition-colors duration-200">
