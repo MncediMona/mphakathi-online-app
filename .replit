@@ -21,19 +21,9 @@ channel = "stable-24_05"
 # For now, let's keep it aligned with the dev setup for testing.
 run = ["sh", "-c", "npm install -g netlify-cli && npm install && netlify dev"]
 
-
-# Port Configuration:
-# - localPort 8888 is where Netlify Dev runs its proxy (serving both frontend and functions)
-# - externalPort 80 is Replit's default public port, so map 8888 to 80 for easy access.
-# - localPort 3000 is your React app's dev server, which Netlify Dev will proxy internally.
-#   It doesn't need to be publicly exposed by Replit, so we mark it as private.
+[[ports]]
+localPort = 3000
 
 [[ports]]
-localPort = 8888 # Netlify Dev's default port
-externalPort = 80 # Replit's default public web port
-visibility = "public"
-default = true # This makes it the primary URL Replit opens
-
-[[ports]]
-localPort = 3000 # Your React app's dev server (proxied by Netlify Dev)
-visibility = "private" # Not directly exposed to the public
+localPort = 8888
+externalPort = 80
