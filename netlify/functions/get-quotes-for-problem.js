@@ -1,12 +1,14 @@
-// netlify/functions/get-quotes-by-provider.js
+// netlify/functions/get-quotes-for-problem.js
 
 const { getDbClient } = require('./db-config');
 
 /**
- * Netlify Function to fetch quotes submitted by a specific provider.
- * Requires provider authentication.
+ * Netlify Function to fetch all quotes for a specific problem.
+ * This should typically be restricted to the problem owner or admin,
+ * or for public viewing after problem resolution/acceptance.
+ * For now, it fetches all but client-side logic will hide confidential info.
  * @param {object} event - The event object from Netlify.
- * @returns {object} A Netlify-compatible response with the provider's quotes.
+ * @returns {object} A Netlify-compatible response with the problem's quotes.
  */
 exports.handler = async (event) => {
     const headers = {
@@ -20,18 +22,24 @@ exports.handler = async (event) => {
         return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
 
-    const { providerId } = event.queryStringParameters;
+    const { problemId } = event.queryStringParameters;
 
-    if (!providerId) {
-        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Provider ID is required.' }) };
+    if (!problemId) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Problem ID is required.' }) };
     }
 
     let client;
     try {
         client = await getDbClient();
 
-        // In a real app, verify the authenticated user matches the providerId.
-        const res = await client.query('SELECT * FROM quotes WHERE provider_id = $1 ORDER BY created_at DESC', [providerId]);
+        // Join with user_profiles to get provider names for display
+        const res = await client.query(
+            `SELECT q.*, up.name as provider_name, up.email as provider_email
+             FROM quotes q
+             JOIN user_profiles up ON q.provider_id = up.id
+             WHERE q.problem_id = $1 ORDER BY q.created_at ASC`,
+            [problemId]
+        );
 
         return {
             statusCode: 200,
@@ -39,7 +47,7 @@ exports.handler = async (event) => {
             body: JSON.stringify(res.rows),
         };
     } catch (error) {
-        console.error('Error fetching quotes by provider:', error.message, error.stack);
+        console.error('Error fetching quotes for problem:', error.message, error.stack);
         return {
             statusCode: 500,
             headers,

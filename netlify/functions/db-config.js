@@ -1,39 +1,52 @@
 // netlify/functions/db-config.js
 const { Pool } = require('pg');
 
-// Netlify DB connection string from environment variables
-// IMPORTANT: This 'DATABASE_URL' MUST be set in Netlify UI
-// Site settings -> Build & deploy -> Environment variables
-const connectionString = process.env.DATABASE_URL;
+let cachedPool = null;
 
-// Create a new Pool instance. This pool will be shared across function invocations
-// for efficiency and connection management.
-const pool = new Pool({
-  connectionString,
-  // The `ssl` option is often needed for external Postgres services like Neon (Netlify DB)
-  // to ensure a secure connection. `rejectUnauthorized: false` can be used for development
-  // or if you're not using trusted certificates, but in production, you should use
-  // proper certificate validation if possible.
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
+async function getDbClient() {
+    // Log the environment variable value (masked for security)
+    console.log('DB_CONFIG_LOG: NEON_DB_URL is set:', !!process.env.NEON_DB_URL);
+    if (process.env.NEON_DB_URL) {
+        console.log('DB_CONFIG_LOG: Using NEON_DB_URL (masked):', process.env.NEON_DB_URL.substring(0, 20) + '...masked...sslmode=require');
+    } else {
+        console.error('DB_CONFIG_LOG: CRITICAL ERROR: NEON_DB_URL environment variable is NOT SET!');
+        throw new Error('Database connection string (NEON_DB_URL) is not set.');
+    }
 
-// Event listener for database connection errors to log them
-pool.on('error', (err, client) => {
-  console.error('Unexpected error on idle client', err);
-  process.exit(-1); // Exit process or handle more gracefully
-});
+    if (cachedPool) {
+        try {
+            // Try to get a client from the pool to check if it's still alive
+            const client = await cachedPool.connect();
+            client.release(); // Release the test client immediately
+            console.log('DB_CONFIG_LOG: Reusing cached DB pool.');
+            return cachedPool.connect(); // Return a new client from the existing pool
+        } catch (e) {
+            console.error('DB_CONFIG_LOG: Cached DB pool connection failed, re-initializing:', e.message);
+            cachedPool = null; // Invalidate cache if connection fails
+        }
+    }
 
-// Export a function to get a client from the pool
-const getDbClient = async () => {
-  try {
-    const client = await pool.connect();
-    return client;
-  } catch (err) {
-    console.error('Error acquiring client from DB pool:', err);
-    throw err; // Re-throw to be caught by the calling function
-  }
-};
+    console.log('DB_CONFIG_LOG: Initializing new DB pool...');
+    try {
+        const pool = new Pool({
+            connectionString: process.env.NEON_DB_URL,
+            ssl: {
+                rejectUnauthorized: false // Required for Neon free tier or self-signed certs
+            },
+            max: 1 // Keep pool small for serverless, adjust as needed
+        });
+
+        // Test connection immediately
+        const client = await pool.connect();
+        client.release(); // Release the test client
+        console.log('DB_CONFIG_LOG: New DB pool connected successfully!');
+
+        cachedPool = pool; // Cache the new pool
+        return cachedPool.connect(); // Return a client from the new pool
+    } catch (error) {
+        console.error('DB_CONFIG_LOG: Failed to connect to database pool:', error.message, error.stack);
+        throw new Error('Database connection failed: ' + error.message);
+    }
+}
 
 module.exports = { getDbClient };

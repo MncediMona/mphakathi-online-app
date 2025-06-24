@@ -1,3 +1,5 @@
+# netlify.toml
+
 [build]
   command = "npm run build"
   publish = "build"
@@ -5,17 +7,32 @@
 
 [dev]
   command = "npm start"
+  port = 8888
   targetPort = 3000
   publish = "build"
   functions = "netlify/functions"
   framework = "#custom"
   host = "0.0.0.0"
 
+# =====================================================================
+# CRITICAL: REDIRECTS ORDER.
+# =====================================================================
+
+# Auth.js specific rewrite:
+[[redirects]]
+  from = "/api/auth/*"
+  to = "/.netlify/functions/auth/:splat"
+  status = 200
+  force = true # Ensures this rule is always applied
+
+# General API function rewrite:
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
+  force = true
 
+# Single Page Application (SPA) fallback:
 [[redirects]]
   from = "/*"
   to = "/index.html"

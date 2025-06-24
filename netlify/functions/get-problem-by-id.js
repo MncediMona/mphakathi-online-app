@@ -1,13 +1,11 @@
-// netlify/functions/get-all-users.js
+// netlify/functions/get-problem-by-id.js
 
 const { getDbClient } = require('./db-config');
 
 /**
- * Netlify Function to get all user profiles.
- * This function should be protected for admin access only in a production environment.
- * For this example, we assume the frontend restricts access.
+ * Netlify Function to fetch a single problem by its ID.
  * @param {object} event - The event object from Netlify.
- * @returns {object} A Netlify-compatible response with all user profiles.
+ * @returns {object} A Netlify-compatible response with the problem data.
  */
 exports.handler = async (event) => {
     const headers = {
@@ -21,24 +19,33 @@ exports.handler = async (event) => {
         return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
 
+    const { problemId } = event.queryStringParameters;
+
+    if (!problemId) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Problem ID is required.' }) };
+    }
+
     let client;
     try {
         client = await getDbClient();
 
-        // Fetch all user profiles
-        const res = await client.query('SELECT * FROM user_profiles ORDER BY created_at DESC');
+        const res = await client.query('SELECT * FROM problems WHERE id = $1', [problemId]);
+
+        if (res.rows.length === 0) {
+            return { statusCode: 404, headers, body: JSON.stringify({ error: 'Problem not found.' }) };
+        }
 
         return {
             statusCode: 200,
             headers,
-            body: JSON.stringify(res.rows),
+            body: JSON.stringify(res.rows[0]),
         };
     } catch (error) {
-        console.error('Error fetching all users:', error.message, error.stack);
+        console.error('Error fetching problem by ID:', error.message, error.stack);
         return {
             statusCode: 500,
             headers,
-            body: JSON.stringify({ error: 'Failed to fetch users', details: error.message }),
+            body: JSON.stringify({ error: 'Failed to fetch problem', details: error.message }),
         };
     } finally {
         if (client) {

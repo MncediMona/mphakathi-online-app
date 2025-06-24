@@ -2,74 +2,52 @@
 # This file tells Replit how to set up and run your development environment.
 
 # Specify Node.js version 22
-modules = ["nodejs-22", "web", "python-3.12"] # Changed nodejs-20 to nodejs-22
-
-# Commands to run on startup
-# We want to:
-# 1. Install netlify-cli globally (if not already)
-# 2. Install project dependencies (npm install)
-# 3. Run netlify dev as the main process
-run = "npm install -g netlify-cli && npm install && netlify dev" # Changed from "npm run dev"
+modules = ["nodejs-22", "web", "python-3.12"]
 
 [nix]
 channel = "stable-24_05"
+packages = ["psmisc"]
 
 [deployment]
-# The deployment run command should also use netlify dev or a production build command
-# For development in Replit, the 'run' command above handles starting.
-# If you plan to deploy directly from Replit, this would need to change to 'npm run build'
-# For now, let's keep it aligned with the dev setup for testing.
+# For Replit's internal deployment system, if you use it directly.
+# For Netlify deployment, this doesn't directly apply as Netlify uses its own build process.
 run = ["sh", "-c", "npm install -g netlify-cli && npm install && netlify dev"]
 
 [[ports]]
 localPort = 3000
 
 [[ports]]
-localPort = 3001
-externalPort = 3001
-
-[[ports]]
 localPort = 8888
 externalPort = 80
+
+[[ports]]
+localPort = 34653
+externalPort = 3000
+
+[[ports]]
+localPort = 36975
+externalPort = 3002
+
+[[ports]]
+localPort = 43823
+externalPort = 3001
 
 [workflows]
 runButton = "Netlify Dev Server"
 
 [[workflows.workflow]]
-name = "Development Server"
-author = 43310456
-mode = "sequential"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npm install"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "BROWSER=none HOST=0.0.0.0 PORT=3000 npm start"
-
-[[workflows.workflow]]
-name = "Build for Production"
-author = 43310456
-mode = "sequential"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npm install"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npm run build"
-
-[[workflows.workflow]]
 name = "Netlify Dev Server"
-author = 43310456
+author = 43310456 # Replace with your Replit user ID if you want to be explicit
 mode = "sequential"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm install"
+args = "npm install -g netlify-cli" # Ensure CLI is installed first
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "netlify dev"
+args = "npm install" # Then install project dependencies
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "netlify dev" # Finally, run Netlify Dev, which in turn runs 'npm start'

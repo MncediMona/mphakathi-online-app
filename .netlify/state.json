@@ -2,20 +2,20 @@
 	"siteId": "30b1ce23-e1c1-4fb3-ae71-612317bbeddd",
 	"geolocation": {
 		"data": {
-			"city": "Pune",
+			"city": "North Charleston",
 			"country": {
-				"code": "IN",
-				"name": "India"
+				"code": "US",
+				"name": "United States"
 			},
 			"subdivision": {
-				"code": "MH",
-				"name": "Maharashtra"
+				"code": "SC",
+				"name": "South Carolina"
 			},
-			"timezone": "Asia/Kolkata",
-			"latitude": 18.5211,
-			"longitude": 73.8502,
-			"postalCode": "411005"
+			"timezone": "America/New_York",
+			"latitude": 32.8608,
+			"longitude": -79.9746,
+			"postalCode": "29415"
 		},
-		"timestamp": 1750628612273
+		"timestamp": 1750762021519
 	}
 }
