@@ -28,3 +28,5 @@ auth_config.json.env
 .netlify
 package-lock.json
 yarn.lock
+
+.env
