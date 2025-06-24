@@ -1,0 +1,57 @@
+// netlify/functions/db-config.js
+
+// Import the PostgreSQL client library
+const { Pool } = require('pg');
+
+// Use the Neon Database connection string from environment variables.
+// IMPORTANT: This is backend code, so it should NOT use 'REACT_APP_' prefix.
+// The NEON_DB_URL environment variable is set directly in your Netlify dashboard
+// (and in your local .env file without REACT_APP_).
+const connectionString = process.env.NEON_DB_URL;
+
+// Ensure the connection string is actually available for debugging
+if (!connectionString) {
+  console.error("ERROR: NEON_DB_URL environment variable is not set!");
+  // Depending on your setup, you might want to throw an error or exit here
+  // process.exit(1);
+}
+
+// Create a new Pool instance for managing database connections.
+// This pool will be shared across function invocations for efficiency and connection management.
+const pool = new Pool({
+  connectionString,
+  ssl: {
+    // This setting is important for secure connections to Neon (or any cloud PostgreSQL)
+    // as it allows your application to trust the SSL certificate provided by Neon.
+    rejectUnauthorized: false
+  }
+});
+
+// Event listener for database connection errors to log them
+// This helps in debugging issues where the database connection might drop or fail.
+pool.on('error', (err, client) => {
+  console.error('Unexpected error on idle client:', err);
+  // In a production Netlify Function, you might log this to a monitoring service
+  // rather than exiting the process, but for local debugging it's helpful.
+  // process.exit(-1); // Consider more graceful error handling in production
+});
+
+/**
+ * Provides a database client from the pool.
+ * @returns {Promise<pg.Client>} A promise that resolves to a PostgreSQL client.
+ * @throws {Error} If there's an error acquiring a client from the pool.
+ */
+const getDbClient = async () => {
+  try {
+    const client = await pool.connect();
+    console.log('Successfully acquired client from DB pool.'); // Log successful connection
+    return client;
+  } catch (err) {
+    console.error('Error acquiring client from DB pool:', err);
+    // Re-throw the error so the calling function can handle it.
+    throw err;
+  }
+};
+
+// Export the function to get a database client for use in other Netlify Functions.
+module.exports = { getDbClient };

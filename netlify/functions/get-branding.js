@@ -1,6 +1,6 @@
 // netlify/functions/get-branding.js
 
-const { getDbClient } = require('./utils/db');
+const { getDbClient } = require('./db-config'); // Correct path
 
 /**
  * Netlify Function handler for fetching application branding settings.
@@ -25,24 +25,27 @@ exports.handler = async (event, context) => {
 
     let client;
     try {
+        console.log('DB_CLIENT_LOG: Attempting to connect to DB for branding...'); // Debugging log
         client = await getDbClient();
+        console.log('DB_CLIENT_LOG: DB client acquired for branding. Querying...'); // Debugging log
+
         // Assuming a 'branding' table with a single row (e.g., ID 1) for global settings.
         const res = await client.query('SELECT app_name, app_logo_url FROM branding WHERE id = 1');
+        console.log('DB_CLIENT_LOG: Branding query result count:', res.rows.length); // Debugging log
+
 
         if (res.rows.length === 0) {
-            // If no branding data is found in the database, return hardcoded defaults.
             console.warn('No branding data found in DB, returning default values.');
             return {
                 statusCode: 200,
                 headers: headers,
                 body: JSON.stringify({
                     app_name: 'Mphakathi Online',
-                    app_logo_url: 'https://placehold.co/100x40/964b00/ffffff?text=Logo' // Placeholder logo
+                    app_logo_url: 'https://placehold.co/100x40/964b00/ffffff?text=Logo'
                 }),
             };
         }
 
-        // Return the branding data found in the database.
         return { statusCode: 200, headers, body: JSON.stringify(res.rows[0]) };
 
     } catch (error) {
@@ -52,5 +55,10 @@ exports.handler = async (event, context) => {
             headers,
             body: JSON.stringify({ error: 'Failed to fetch branding', details: error.message }),
         };
+    } finally {
+        if (client) {
+            client.release();
+            console.log('DB_CLIENT_LOG: DB client released for branding.'); // Debugging log
+        }
     }
 };
