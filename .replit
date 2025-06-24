@@ -33,7 +33,7 @@ localPort = 8888
 externalPort = 80
 
 [workflows]
-runButton = "Development Server"
+runButton = "Netlify Dev Server"
 
 [[workflows.workflow]]
 name = "Development Server"
@@ -60,3 +60,16 @@ args = "npm install"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npm run build"
+
+[[workflows.workflow]]
+name = "Netlify Dev Server"
+author = 43310456
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm install"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "netlify dev"

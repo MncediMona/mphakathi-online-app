@@ -17,7 +17,7 @@ const config = {
   // This will be used in App.js for making fetch requests.
   // In Replit, window.location.origin will be your public Replit URL (e.g., https://your-repl-name-8888.your-username.repl.co)
   apiBaseUrl: process.env.NODE_ENV === 'development'
-    ? `${window.location.origin}` // Use current origin for local/Replit dev
+    ? 'http://localhost:8888' // Netlify dev server URL
     : 'https://dashboard.mphakathi.online' // Your production deployment base URL
 };
 
