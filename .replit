@@ -25,6 +25,10 @@ run = ["sh", "-c", "npm install -g netlify-cli && npm install && netlify dev"]
 localPort = 3000
 
 [[ports]]
+localPort = 3001
+externalPort = 3001
+
+[[ports]]
 localPort = 8888
 externalPort = 80
 
