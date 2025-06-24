@@ -1623,7 +1623,7 @@ const ProblemCard = ({ problem, userRole, onNavigate }) => {
 
 // ProblemDetailPage handles displaying details and also acts as an edit modal if needed
 const ProblemDetailPage = ({ problem, onClose, onSave, onAcceptQuote, onDeleteProblem, onMarkResolved, onApproveProblem }) => {
-    const { userRole, userProfile, isPaidMember, setSubmittingQuoteForProblem, setEditingQuote, setMessage } = useContext(AppContext);
+    const { userRole, userProfile, isPaidMember, setSubmittingQuoteForProblem, setEditingQuote } = useContext(AppContext);
     const [confirmModalMessage, setConfirmModalMessage] = useState('');
     const [confirmModalAction, setConfirmModalAction] = useState(null);
     const [showConfirmModalLocal, setShowConfirmModalLocal] = useState(false);
@@ -1659,11 +1659,7 @@ const ProblemDetailPage = ({ problem, onClose, onSave, onAcceptQuote, onDeletePr
     const isRequester = userProfile?.id === problem.requester_id;
     const isProblemOpen = problem.status === 'open';
 
-    const triggerConfirmationLocal = (message, action) => {
-        setConfirmModalMessage(message);
-        setConfirmModalAction(() => action);
-        setShowConfirmModalLocal(true);
-    };
+    
 
     // Determine if this component is rendered as a modal or a page based on 'onClose' prop
     const isModal = typeof onClose === 'function';
