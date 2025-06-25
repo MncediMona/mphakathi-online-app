@@ -7,7 +7,6 @@ import {
 } from 'lucide-react';
 import { signIn, signOut, useSession } from 'next-auth/react'; // Auth.js hooks for session management
 import config from './config';
-const API_BASE_URL = config.apiBaseUrl;
 
 // Create a React Context to share application-wide data (e.g., user info, fetched data)
 export const AppContext = createContext(null);
