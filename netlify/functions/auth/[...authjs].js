@@ -14,7 +14,7 @@ if (!process.env.AUTH_SECRET) {
   throw new Error("AUTH_SECRET environment variable is not set. It is required for Auth.js.");
 }
 if (!process.env.NEON_DB_URL) {
-  throw new Error("NEON_DB_URL environment variable is not set. It is required for the database adapter.");
+  throw new new Error("NEON_DB_URL environment variable is not set. It is required for the database adapter.");
 }
 // Add explicit check for NEXTAUTH_URL as it's critical for local dev redirects
 if (!process.env.NEXTAUTH_URL) {
