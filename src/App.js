@@ -6,8 +6,12 @@ import {
   CheckCircle2Icon, PaintbrushIcon, XIcon // Lucide icons for navigation and actions
 } from 'lucide-react';
 // IMPORT STACK AUTH SDK
-import { StackAuthProvider, useStackAuth } from '@stackframe/stack'; // Corrected import
-import config from './config';
+// We'll use useUser for getting the user info and isAuthenticated status,
+// and StackAuthProvider to wrap the application for context.
+// login and logout functions are typically accessed directly from the useStackAuth hook
+// as useStackApp only provides the client app instance.
+import { StackAuthProvider, useUser, useStackApp } from '@stackframe/stack';
+import config from './config'; // Make sure config.js exists and is correctly configured
 
 // Create a React Context to share application-wide data (e.g., user info, fetched data)
 export const AppContext = createContext(null);
@@ -29,7 +33,7 @@ const ConfirmationModal = ({ message, onConfirm, onCancel, confirmText = "Confir
             onClick={onCancel}
             className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
           >
-            Cancel
+            {cancelText}
           </button>
           <button
             onClick={onConfirm}
@@ -194,40 +198,41 @@ const QuoteModal = ({ isOpen, onClose, problem, onSubmitQuote }) => {
 const ProblemDetailPage = ({ problemId, onClose, onShowQuoteModal }) => {
   const [problem, setProblem] = useState(null);
   const [quotes, setQuotes] = useState([]);
-  // Get authentication state and user from Stack Auth
-  const { isAuthenticated, user: stackAuthUser } = useStackAuth();
+  const { isAuthenticated, user: stackAuthUser } = useUser(); // Using useUser for auth state
   const { userProfile, fetchMyRequests, fetchPublicProblems, fetchMyQuotes } = React.useContext(AppContext);
 
   // Functions for quote actions, now using fetch
   const handleAcceptQuote = useCallback(async (quoteId) => {
+    // Ensure authentication and authorization
     if (!isAuthenticated || !stackAuthUser || !userProfile || problem?.user_id !== userProfile.id) {
       alert("You are not authorized to accept this quote.");
       return;
     }
     // You might want to add a check for paid membership here, as per your business logic
-    // if (!isPaidMember) { alert("You must be a paid member to accept quotes."); return; }
+    // if (!userProfile?.is_paid_member) { alert("You must be a paid member to accept quotes."); return; }
 
     try {
-      // Pass Stack Auth token in headers for authorization if your functions are protected
+      // Your Netlify function should verify the token sent with the request
       const response = await fetch(`${API_BASE_URL}/.netlify/functions/update-quote-status`, {
-        method: 'POST', // Or PUT, depending on your function
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quoteId, status: 'accepted', problemId: problem.id, userId: userProfile.id }),
       });
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       await response.json(); // Consume response
       alert("Quote accepted! Problem status updated.");
-      // Re-fetch relevant data after action, use correct context functions
-      // The context functions below are placeholders, ensure they are passed correctly if needed here.
-      // fetchProblemDetails(); // Re-fetch details to update UI (needs to be passed from App)
-      // fetchMyRequests(); // Re-fetch user's requests if it was their problem (needs to be passed from App)
-      // fetchPublicProblems(); // Update public problem list (needs to be passed from App)
+      // Re-fetch details to update UI - these functions need to be passed down or accessed via context
+      // Assuming AppContext provides these if needed in ProblemDetailPage
+      fetchProblemDetails(); // This function is defined locally below, so it's fine.
+      if (fetchMyRequests) fetchMyRequests(); // Re-fetch user's requests if it was their problem
+      if (fetchPublicProblems) fetchPublicProblems(); // Update public problem list
     } catch (error) {
       console.error("Failed to accept quote:", error);
       alert("Failed to accept quote: " + error.message);
     }
-  }, [isAuthenticated, stackAuthUser, userProfile, problem]);
+  }, [isAuthenticated, stackAuthUser, userProfile, problem, fetchMyRequests, fetchPublicProblems]); // Added fetchMyRequests, fetchPublicProblems to dependencies
 
+  // fetchProblemDetails is local to ProblemDetailPage
   const fetchProblemDetails = useCallback(async () => {
     try {
       const problemResponse = await fetch(`${API_BASE_URL}/.netlify/functions/get-problem-details?problemId=${problemId}`);
@@ -248,7 +253,7 @@ const ProblemDetailPage = ({ problemId, onClose, onShowQuoteModal }) => {
 
   useEffect(() => {
     fetchProblemDetails();
-  }, [fetchProblemDetails]);
+  }, [fetchProblemDetails]); // Dependency is correct as fetchProblemDetails is memoized
 
   if (!problem) return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -336,7 +341,8 @@ const ProblemDetailPage = ({ problemId, onClose, onShowQuoteModal }) => {
 // Main App Component
 const App = () => {
   // Use Stack Auth hooks to get authentication state and user
-  const { isAuthenticated, user: stackAuthUser, isLoading: isStackAuthLoading, login, logout } = useStackAuth();
+  const { isAuthenticated, user: stackAuthUser, isLoading: isStackAuthLoading } = useUser();
+  const stackApp = useStackApp(); // Get the Stack App client instance for login/logout
 
   const [branding, setBranding] = useState(null);
   const [pricingPlans, setPricingPlans] = useState([]);
@@ -399,13 +405,14 @@ const App = () => {
       return;
     }
     try {
+      // Send Stack Auth user ID, email, name to your backend to get/create user profile
       const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-or-create-user-profile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          auth0Id: stackAuthUser.id, // Assuming Stack Auth user object has 'id'
+          auth0Id: stackAuthUser.id, // Assuming Stack Auth user object has a unique 'id'
           email: stackAuthUser.email,
-          name: stackAuthUser.name,
+          name: stackAuthUser.displayName || stackAuthUser.email, // Use displayName if available, else email
         }),
       });
       if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
@@ -414,7 +421,7 @@ const App = () => {
       setEmailNotifications(data.email_notifications || false);
       setSmsNotifications(data.sms_notifications || false);
     } catch (error) { console.error("Error fetching or creating user profile:", error); }
-  }, [isAuthenticated, stackAuthUser]);
+  }, [isAuthenticated, stackAuthUser]); // Dependencies for this useCallback
 
   const fetchMyRequests = useCallback(async () => {
     if (!isAuthenticated || !userProfile?.id) {
@@ -463,9 +470,10 @@ const App = () => {
 
   // Effect for user-specific data (profile, requests, quotes)
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated) { // Trigger when Stack Auth confirms authentication
       fetchOrCreateUserProfile();
     } else {
+      // Clear user-specific state if not authenticated
       setUserProfile(null);
       setEmailNotifications(false);
       setSmsNotifications(false);
@@ -475,11 +483,11 @@ const App = () => {
   }, [isAuthenticated, fetchOrCreateUserProfile]);
 
   useEffect(() => {
-    if (userProfile?.id) {
+    if (userProfile?.id && isAuthenticated) { // Ensure userProfile is loaded and authenticated
       fetchMyRequests();
       fetchMyQuotes(); // Only runs if userProfile.role is provider
     }
-  }, [userProfile?.id, fetchMyRequests, fetchMyQuotes]);
+  }, [userProfile?.id, isAuthenticated, fetchMyRequests, fetchMyQuotes]);
 
 
   // =========================================================================
@@ -556,11 +564,13 @@ const App = () => {
   };
 
   const handleLogin = () => {
-    login(); // Stack Auth login
+    // Calling login from useStackApp instance
+    stackApp.login();
   };
 
   const handleLogout = () => {
-    logout(); // Stack Auth logout
+    // Calling logout from useStackApp instance
+    stackApp.logout();
   };
 
 
@@ -568,6 +578,7 @@ const App = () => {
   // LOADING / UI RENDERING
   // =========================================================================
 
+  // Combine loading states for initial app data and Stack Auth SDK
   if (isStackAuthLoading || appDataLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
@@ -732,6 +743,7 @@ const App = () => {
 
   return (
     // Wrap with Stack Auth Provider component
+    // Pass projectId and publishableClientKey from environment variables
     <StackAuthProvider
       projectId={process.env.REACT_APP_STACK_PROJECT_ID || process.env.VITE_STACK_PROJECT_ID}
       publishableClientKey={process.env.REACT_APP_STACK_PUBLISHABLE_CLIENT_KEY || process.env.VITE_STACK_PUBLISHABLE_CLIENT_KEY}
@@ -743,14 +755,15 @@ const App = () => {
         userProfile,
         myRequests,
         myQuotes,
+        // Expose fetch functions that might be needed by child components (e.g., ProblemDetailPage)
         fetchMyRequests,
         fetchPublicProblems,
         fetchMyQuotes,
-        // Provide Stack Auth state and methods via context
+        // Provide Stack Auth state and methods via context as needed
         isAuthenticated,
-        user: stackAuthUser, // Provide the Stack Auth user object
-        login, // Provide login function
-        logout, // Provide logout function
+        user: stackAuthUser,
+        login: handleLogin, // Expose login from here
+        logout: handleLogout, // Expose logout from here
       }}>
         <div className="min-h-screen bg-gray-100 flex flex-col">
           {/* Navigation */}
