@@ -6,12 +6,15 @@ import {
   CheckCircle2Icon, PaintbrushIcon, XIcon // Lucide icons for navigation and actions
 } from 'lucide-react';
 // IMPORT STACK AUTH SDK
-// We'll use useUser for getting the user info and isAuthenticated status,
-// and StackAuthProvider to wrap the application for context.
-// login and logout functions are typically accessed directly from the useStackAuth hook
-// as useStackApp only provides the client app instance.
-import { StackAuthProvider, useUser, useStackApp } from '@stackframe/stack';
+// Corrected import: use StackProvider for the wrapping component, and useUser/useStackApp hooks.
+import { StackProvider, useUser, useStackApp } from '@stackframe/stack';
 import config from './config'; // Make sure config.js exists and is correctly configured
+
+// Assuming you have a src/stack.js or src/stack.ts file that exports stackClientApp
+// This file should contain:
+// import { createStackClientApp } from "@stackframe/stack";
+// export const stackClientApp = createStackClientApp({ ... });
+import { stackClientApp } from './stack';
 
 // Create a React Context to share application-wide data (e.g., user info, fetched data)
 export const AppContext = createContext(null);
@@ -198,7 +201,8 @@ const QuoteModal = ({ isOpen, onClose, problem, onSubmitQuote }) => {
 const ProblemDetailPage = ({ problemId, onClose, onShowQuoteModal }) => {
   const [problem, setProblem] = useState(null);
   const [quotes, setQuotes] = useState([]);
-  const { isAuthenticated, user: stackAuthUser } = useUser(); // Using useUser for auth state
+  // Get authentication state and user from Stack Auth
+  const { isAuthenticated, user: stackAuthUser } = useUser();
   const { userProfile, fetchMyRequests, fetchPublicProblems, fetchMyQuotes } = React.useContext(AppContext);
 
   // Functions for quote actions, now using fetch
@@ -221,8 +225,7 @@ const ProblemDetailPage = ({ problemId, onClose, onShowQuoteModal }) => {
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       await response.json(); // Consume response
       alert("Quote accepted! Problem status updated.");
-      // Re-fetch details to update UI - these functions need to be passed down or accessed via context
-      // Assuming AppContext provides these if needed in ProblemDetailPage
+      // Re-fetch relevant data after action, use correct context functions
       fetchProblemDetails(); // This function is defined locally below, so it's fine.
       if (fetchMyRequests) fetchMyRequests(); // Re-fetch user's requests if it was their problem
       if (fetchPublicProblems) fetchPublicProblems(); // Update public problem list
@@ -230,7 +233,7 @@ const ProblemDetailPage = ({ problemId, onClose, onShowQuoteModal }) => {
       console.error("Failed to accept quote:", error);
       alert("Failed to accept quote: " + error.message);
     }
-  }, [isAuthenticated, stackAuthUser, userProfile, problem, fetchMyRequests, fetchPublicProblems]); // Added fetchMyRequests, fetchPublicProblems to dependencies
+  }, [isAuthenticated, stackAuthUser, userProfile, problem, fetchMyRequests, fetchPublicProblems]);
 
   // fetchProblemDetails is local to ProblemDetailPage
   const fetchProblemDetails = useCallback(async () => {
@@ -744,9 +747,9 @@ const App = () => {
   return (
     // Wrap with Stack Auth Provider component
     // Pass projectId and publishableClientKey from environment variables
-    <StackAuthProvider
-      projectId={process.env.REACT_APP_STACK_PROJECT_ID || process.env.VITE_STACK_PROJECT_ID}
-      publishableClientKey={process.env.REACT_APP_STACK_PUBLISHABLE_CLIENT_KEY || process.env.VITE_STACK_PUBLISHABLE_CLIENT_KEY}
+    // Ensure stackClientApp is correctly configured and passed as the 'app' prop
+    <StackProvider
+      app={stackClientApp} // Pass the client app instance here
     >
       <AppContext.Provider value={{
         branding,
@@ -938,7 +941,7 @@ const App = () => {
           )}
         </div>
       </AppContext.Provider>
-    </StackAuthProvider>
+    </StackProvider>
   );
 };
 
