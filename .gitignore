@@ -29,4 +29,8 @@ auth_config.json.env
 package-lock.json
 yarn.lock
 
+# Environments
 .env
+.env.local
+.env.development
+.env.production
