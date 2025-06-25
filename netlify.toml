@@ -18,21 +18,20 @@
 # CRITICAL: REDIRECTS ORDER.
 # =====================================================================
 
-# Auth.js specific rewrite:
+# netlify.toml
 [[redirects]]
   from = "/api/auth/*"
-  to = "/.netlify/functions/auth/:splat"
+  to = "/.netlify/functions/auth-handler" # <--- CHANGE THIS LINE
   status = 200
-  force = true # Ensures this rule is always applied
+  force = true
 
-# General API function rewrite:
+# Keep your other redirect rules as they are:
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
   force = true
 
-# Single Page Application (SPA) fallback:
 [[redirects]]
   from = "/*"
   to = "/index.html"
