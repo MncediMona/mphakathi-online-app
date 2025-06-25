@@ -18,20 +18,24 @@
 # CRITICAL: REDIRECTS ORDER.
 # =====================================================================
 
-# netlify.toml
-[[redirects]]
-  from = "/api/auth/*"
-  to = "/.netlify/functions/auth-handler" # <--- CHANGE THIS LINE
-  status = 200
-  force = true
+# REMOVED: The specific /api/auth/* redirect for NextAuth.js
+# This redirect is no longer needed as Stack Auth handles its own login flow directly.
+# [[redirects]]
+#   from = "/api/auth/*"
+#   to = "/.netlify/functions/auth-handler"
+#   status = 200
+#   force = true
 
-# Keep your other redirect rules as they are:
+# Keep your general API function rewrite:
+# This ensures your other Netlify Functions (like get-problems, post-problem) work correctly.
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
   force = true
 
+# Keep your SPA fallback:
+# This ensures that any paths not matching a file or function fall back to your React app's index.html.
 [[redirects]]
   from = "/*"
   to = "/index.html"

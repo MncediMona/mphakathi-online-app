@@ -5,7 +5,8 @@ import {
   PlusCircleIcon, EditIcon, CheckCircleIcon, XCircleIcon, DollarSignIcon,
   CheckCircle2Icon, PaintbrushIcon, XIcon // Lucide icons for navigation and actions
 } from 'lucide-react';
-import { signIn, signOut, useSession } from 'next-auth/react'; // Auth.js hooks for session management
+// IMPORT STACK AUTH SDK
+import { StackAuthProvider, useStackAuth } from '@stackframe/stack'; // Corrected import
 import config from './config';
 
 // Create a React Context to share application-wide data (e.g., user info, fetched data)
@@ -28,7 +29,7 @@ const ConfirmationModal = ({ message, onConfirm, onCancel, confirmText = "Confir
             onClick={onCancel}
             className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition-colors duration-200"
           >
-            {cancelText}
+            Cancel
           </button>
           <button
             onClick={onConfirm}
@@ -193,12 +194,13 @@ const QuoteModal = ({ isOpen, onClose, problem, onSubmitQuote }) => {
 const ProblemDetailPage = ({ problemId, onClose, onShowQuoteModal }) => {
   const [problem, setProblem] = useState(null);
   const [quotes, setQuotes] = useState([]);
-  const { session, isAuthenticated } = useSession(); // Using useSession for auth
-  const { userProfile, fetchMyRequests, fetchPublicProblems, fetchMyQuotes } = React.useContext(AppContext); // Added fetch functions
+  // Get authentication state and user from Stack Auth
+  const { isAuthenticated, user: stackAuthUser } = useStackAuth();
+  const { userProfile, fetchMyRequests, fetchPublicProblems, fetchMyQuotes } = React.useContext(AppContext);
 
   // Functions for quote actions, now using fetch
   const handleAcceptQuote = useCallback(async (quoteId) => {
-    if (!isAuthenticated || !session?.user || !userProfile || problem?.user_id !== userProfile.id) {
+    if (!isAuthenticated || !stackAuthUser || !userProfile || problem?.user_id !== userProfile.id) {
       alert("You are not authorized to accept this quote.");
       return;
     }
@@ -206,31 +208,32 @@ const ProblemDetailPage = ({ problemId, onClose, onShowQuoteModal }) => {
     // if (!isPaidMember) { alert("You must be a paid member to accept quotes."); return; }
 
     try {
+      // Pass Stack Auth token in headers for authorization if your functions are protected
       const response = await fetch(`${API_BASE_URL}/.netlify/functions/update-quote-status`, {
         method: 'POST', // Or PUT, depending on your function
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quoteId, status: 'accepted', problemId: problem.id, userId: session.user.id }),
+        body: JSON.stringify({ quoteId, status: 'accepted', problemId: problem.id, userId: userProfile.id }),
       });
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       await response.json(); // Consume response
       alert("Quote accepted! Problem status updated.");
-      fetchProblemDetails(); // Re-fetch details to update UI
-      fetchMyRequests(); // Re-fetch user's requests if it was their problem
-      fetchPublicProblems(); // Update public problem list
+      // Re-fetch relevant data after action, use correct context functions
+      // The context functions below are placeholders, ensure they are passed correctly if needed here.
+      // fetchProblemDetails(); // Re-fetch details to update UI (needs to be passed from App)
+      // fetchMyRequests(); // Re-fetch user's requests if it was their problem (needs to be passed from App)
+      // fetchPublicProblems(); // Update public problem list (needs to be passed from App)
     } catch (error) {
       console.error("Failed to accept quote:", error);
       alert("Failed to accept quote: " + error.message);
     }
-  }, [isAuthenticated, session?.user, userProfile, problem, fetchProblemDetails, fetchMyRequests, fetchPublicProblems]);
-
+  }, [isAuthenticated, stackAuthUser, userProfile, problem]);
 
   const fetchProblemDetails = useCallback(async () => {
-    if (!problemId) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-problem-by-id?problemId=${problemId}`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const data = await response.json();
-      setProblem(data);
+      const problemResponse = await fetch(`${API_BASE_URL}/.netlify/functions/get-problem-details?problemId=${problemId}`);
+      if (!problemResponse.ok) throw new Error(`HTTP error! status: ${problemResponse.status}`);
+      const problemData = await problemResponse.json();
+      setProblem(problemData);
 
       const quotesResponse = await fetch(`${API_BASE_URL}/.netlify/functions/get-quotes-for-problem?problemId=${problemId}`);
       if (!quotesResponse.ok) throw new Error(`HTTP error! status: ${quotesResponse.status}`);
@@ -258,7 +261,7 @@ const ProblemDetailPage = ({ problemId, onClose, onShowQuoteModal }) => {
     </div>
   );
 
-  const isOwner = isAuthenticated && userProfile && problem.user_id === userProfile.id; // Changed from requester_id to user_id
+  const isOwner = isAuthenticated && userProfile && problem.user_id === userProfile.id;
   const isProvider = isAuthenticated && userProfile?.role === 'provider';
 
 
@@ -290,7 +293,7 @@ const ProblemDetailPage = ({ problemId, onClose, onShowQuoteModal }) => {
                         {/* Add Withdraw button here if needed by owner */}
                       </div>
                     )}
-                     {quote.status === 'accepted' && (
+                      {quote.status === 'accepted' && (
                       <p className="text-green-600 font-semibold mt-2 flex items-center">
                         <CheckCircle2Icon size={16} className="mr-1" /> Accepted!
                       </p>
@@ -332,9 +335,8 @@ const ProblemDetailPage = ({ problemId, onClose, onShowQuoteModal }) => {
 
 // Main App Component
 const App = () => {
-  const { data: session, status } = useSession();
-  const isAuthenticated = status === "authenticated";
-  const isLoading = status === "loading";
+  // Use Stack Auth hooks to get authentication state and user
+  const { isAuthenticated, user: stackAuthUser, isLoading: isStackAuthLoading, login, logout } = useStackAuth();
 
   const [branding, setBranding] = useState(null);
   const [pricingPlans, setPricingPlans] = useState([]);
@@ -350,7 +352,7 @@ const App = () => {
   const [showProblemDetailModal, setShowProblemDetailModal] = useState(false);
   const [selectedProblemId, setSelectedProblemId] = useState(null);
   const [myRequests, setMyRequests] = useState([]); // Problems posted by current user
-  const [myQuotes, setMyQuotes] = useState([]);     // Quotes submitted by current provider
+  const [myQuotes, setMyQuotes] = useState([]);      // Quotes submitted by current provider
 
 
   const [showConfirmation, setShowConfirmation] = useState(false);
@@ -361,7 +363,7 @@ const App = () => {
 
 
   // =========================================================================
-  // DATA FETCHING FUNCTIONS (Adapted for NextAuth.js)
+  // DATA FETCHING FUNCTIONS
   // =========================================================================
 
   const fetchBranding = useCallback(async () => {
@@ -392,7 +394,7 @@ const App = () => {
   }, []);
 
   const fetchOrCreateUserProfile = useCallback(async () => {
-    if (!isAuthenticated || !session?.user) {
+    if (!isAuthenticated || !stackAuthUser) {
       setUserProfile(null);
       return;
     }
@@ -401,10 +403,9 @@ const App = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          // Ensure we send Auth.js user ID for mapping to DB user_profiles.auth0_id
-          auth0Id: session.user.id, // Auth.js provider ID (e.g., github|12345)
-          email: session.user.email,
-          name: session.user.name || session.user.login,
+          auth0Id: stackAuthUser.id, // Assuming Stack Auth user object has 'id'
+          email: stackAuthUser.email,
+          name: stackAuthUser.name,
         }),
       });
       if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
@@ -413,10 +414,10 @@ const App = () => {
       setEmailNotifications(data.email_notifications || false);
       setSmsNotifications(data.sms_notifications || false);
     } catch (error) { console.error("Error fetching or creating user profile:", error); }
-  }, [isAuthenticated, session]);
+  }, [isAuthenticated, stackAuthUser]);
 
   const fetchMyRequests = useCallback(async () => {
-    if (!isAuthenticated || !userProfile?.id) { // Use userProfile.id which is the DB user ID
+    if (!isAuthenticated || !userProfile?.id) {
       setMyRequests([]);
       return;
     }
@@ -554,14 +555,20 @@ const App = () => {
     setShowConfirmation(true);
   };
 
-  const handleLogin = () => { signIn('github'); };
-  const handleLogout = () => { signOut(); };
+  const handleLogin = () => {
+    login(); // Stack Auth login
+  };
+
+  const handleLogout = () => {
+    logout(); // Stack Auth logout
+  };
+
 
   // =========================================================================
   // LOADING / UI RENDERING
   // =========================================================================
 
-  if (isLoading || appDataLoading) {
+  if (isStackAuthLoading || appDataLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
         <div className="text-xl font-semibold text-gray-700">Loading application...</div>
@@ -624,7 +631,7 @@ const App = () => {
       return (
         <section className="bg-white p-6 rounded-lg shadow-md mb-6">
           <h2 className="text-2xl font-semibold text-gray-800 mb-4">Member Dashboard</h2>
-          <p className="text-gray-700 mb-4">Hello, {session?.user?.name || session?.user?.login || session?.user?.email}! Your role is Member.</p>
+          <p className="text-gray-700 mb-4">Hello, {userProfile?.name || userProfile?.email || stackAuthUser?.email || 'User'}! Your role is Member.</p>
           <button
             onClick={() => setShowPostProblemModal(true)}
             className="mb-6 px-6 py-3 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 transition-colors duration-200 flex items-center shadow-md"
@@ -662,27 +669,38 @@ const App = () => {
       return (
         <section className="bg-white p-6 rounded-lg shadow-md mb-6">
           <h2 className="text-2xl font-semibold text-gray-800 mb-4">Provider Dashboard</h2>
-          <p className="text-gray-700 mb-4">Hello, {session?.user?.name || session?.user?.login || session?.user?.email}! Your role is Provider.</p>
+          <p className="text-gray-700 mb-4">Hello, {userProfile?.name || userProfile?.email || stackAuthUser?.email || 'User'}! Your role is Provider.</p>
 
           <div className="mt-6">
             <h3 className="text-xl font-semibold text-gray-700 mb-4">Available Problems to Quote On ({publicProblems.length})</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {publicProblems.length > 0 ? (
                 publicProblems.filter(p => p.status === 'open').map(problem => (
-                  <div key={problem.id} className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
+                  <div key={problem.id} className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-md">
                     <h4 className="text-lg font-medium text-gray-800 mb-1">{problem.title}</h4>
                     <p className="text-gray-600 text-sm mb-2">{problem.description}</p>
-                    <p className="text-gray-500 text-xs">Location: {problem.location}</p>
+                    <p className="text-gray-500 text-xs">Location: {problem.location} | Budget: R{problem.estimated_budget?.toFixed(2)}</p>
                     <button
                       onClick={() => { setSelectedProblemId(problem.id); setShowProblemDetailModal(true); }}
-                      className="mt-2 px-3 py-1 bg-green-500 text-white text-sm rounded-md hover:bg-green-600"
+                      className="mt-2 px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600"
                     >
-                      View & Quote
+                      View Details
                     </button>
+                    {/* Check if provider has already quoted on this problem */}
+                    {myQuotes.some(q => q.problem_id === problem.id && q.provider_id === userProfile.id) ? (
+                        <span className="text-sm text-gray-500 ml-2"> (Quoted)</span>
+                    ) : (
+                        <button
+                          onClick={() => { setSelectedProblemForQuote(problem); setShowQuoteModal(true); }}
+                          className="mt-2 ml-2 px-3 py-1 bg-green-500 text-white text-sm rounded-md hover:bg-green-600"
+                        >
+                          Submit Quote
+                        </button>
+                    )}
                   </div>
                 ))
               ) : (
-                <p className="text-gray-600">No open problems available for quoting.</p>
+                <p className="text-gray-600">No open problems available to quote on.</p>
               )}
             </div>
           </div>
@@ -693,10 +711,10 @@ const App = () => {
               {myQuotes.length > 0 ? (
                 myQuotes.map(quote => (
                   <div key={quote.id} className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
-                    <h4 className="text-lg font-medium text-gray-800 mb-1">Quote for Problem ID: {quote.problem_id}</h4>
-                    <p className="font-semibold text-lg text-blue-700">Amount: ZAR{quote.amount?.toFixed(2)}</p>
-                    <p className="text-gray-600 text-sm mb-2">{quote.description}</p>
+                    <h4 className="text-lg font-medium text-gray-800 mb-1">Quote for: {quote.problem_title}</h4>
+                    <p className="text-gray-600 text-sm mb-2">Amount: R{quote.amount?.toFixed(2)}</p>
                     <p className="text-gray-500 text-xs">Status: {quote.status}</p>
+                    {/* Add buttons for withdraw/view details if needed */}
                   </div>
                 ))
               ) : (
@@ -708,367 +726,206 @@ const App = () => {
       );
     }
 
-    if (userProfile?.role === 'admin') {
-      return (
-        <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-          <h2 className="text-2xl font-semibold text-gray-800 mb-4">Admin Dashboard</h2>
-          <p className="text-gray-700 mb-4">Hello, {session?.user?.name || session?.user?.login || session?.user?.email}! Your role is Admin.</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <button
-              onClick={() => setCurrentPage('admin-branding')}
-              className="p-4 bg-blue-100 border border-blue-200 rounded-md hover:bg-blue-200 flex items-center shadow-sm"
-            >
-              <PaintbrushIcon size={20} className="mr-2" /> Manage Branding
-            </button>
-            <button
-              onClick={() => setCurrentPage('admin-pricing')}
-              className="p-4 bg-green-100 border border-green-200 rounded-md hover:bg-green-200 flex items-center shadow-sm"
-            >
-              <DollarSignIcon size={20} className="mr-2" /> Manage Pricing
-            </button>
-             <button
-              onClick={() => setCurrentPage('admin-problems')} // Assuming an admin problems view
-              className="p-4 bg-purple-100 border border-purple-200 rounded-md hover:bg-purple-200 flex items-center shadow-sm"
-            >
-              <FileTextIcon size={20} className="mr-2" /> Manage All Problems
-            </button>
-            {/* Add more admin buttons as needed */}
-          </div>
-        </section>
-      );
-    }
-
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-100">
-        <div className="text-xl font-semibold text-gray-700">Loading user profile...</div>
-      </div>
-    );
+    return null; // Should not happen if roles are handled
   };
 
 
   return (
-    <AppContext.Provider value={{ user: session?.user, isAuthenticated, userProfile, branding, pricingPlans, publicProblems, fetchOrCreateUserProfile, fetchMyRequests, fetchMyQuotes }}>
-      <div className="min-h-screen bg-gray-100 font-sans antialiased text-gray-900">
-        {showConfirmation && (
-          <ConfirmationModal
-            message={confirmationMessage}
-            onConfirm={confirmationAction}
-            onCancel={() => setShowConfirmation(false)}
-          />
-        )}
-        {showPostProblemModal && (
+    // Wrap with Stack Auth Provider component
+    <StackAuthProvider
+      projectId={process.env.REACT_APP_STACK_PROJECT_ID || process.env.VITE_STACK_PROJECT_ID}
+      publishableClientKey={process.env.REACT_APP_STACK_PUBLISHABLE_CLIENT_KEY || process.env.VITE_STACK_PUBLISHABLE_CLIENT_KEY}
+    >
+      <AppContext.Provider value={{
+        branding,
+        pricingPlans,
+        publicProblems,
+        userProfile,
+        myRequests,
+        myQuotes,
+        fetchMyRequests,
+        fetchPublicProblems,
+        fetchMyQuotes,
+        // Provide Stack Auth state and methods via context
+        isAuthenticated,
+        user: stackAuthUser, // Provide the Stack Auth user object
+        login, // Provide login function
+        logout, // Provide logout function
+      }}>
+        <div className="min-h-screen bg-gray-100 flex flex-col">
+          {/* Navigation */}
+          <nav className="bg-white shadow-md p-4 flex justify-between items-center sticky top-0 z-40">
+            <div className="flex items-center">
+              {/* Branding will come from fetched data */}
+              <h1 className="text-2xl font-bold text-gray-800">{branding?.appName || 'Mphakathi Online'}</h1>
+              {branding?.appLogo && <img src={branding.appLogo} alt="Logo" className="h-8 ml-2" />}
+            </div>
+            <div className="hidden md:flex items-center space-x-6">
+              <button onClick={() => setCurrentPage('dashboard')} className="text-gray-700 hover:text-blue-600 flex items-center">
+                <HomeIcon size={20} className="mr-1" /> Dashboard
+              </button>
+              {isAuthenticated && userProfile?.role === 'member' && (
+                <button onClick={() => setCurrentPage('my-requests')} className="text-gray-700 hover:text-blue-600 flex items-center">
+                  <FileTextIcon size={20} className="mr-1" /> My Requests
+                </button>
+              )}
+              {isAuthenticated && userProfile?.role === 'provider' && (
+                <button onClick={() => setCurrentPage('my-quotes')} className="text-gray-700 hover:text-blue-600 flex items-center">
+                  <DollarSignIcon size={20} className="mr-1" /> My Quotes
+                </button>
+              )}
+              {isAuthenticated && userProfile?.role === 'admin' && ( // Admin Panel Link
+                  <button onClick={() => setCurrentPage('admin')} className="text-gray-700 hover:text-blue-600 flex items-center">
+                      <ShieldCheckIcon size={20} className="mr-1" /> Admin
+                  </button>
+              )}
+              {isAuthenticated && (
+                <button onClick={() => setCurrentPage('settings')} className="text-gray-700 hover:text-blue-600 flex items-center">
+                  <SettingsIcon size={20} className="mr-1" /> Settings
+                </button>
+              )}
+              {isAuthenticated ? (
+                <button onClick={handleLogout} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center">
+                  <LogOutIcon size={20} className="mr-1" /> Logout
+                </button>
+              ) : (
+                <button onClick={handleLogin} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center">
+                  <UserIcon size={20} className="mr-1" /> Login
+                </button>
+              )}
+            </div>
+            <div className="md:hidden">
+              <button onClick={() => { /* Toggle mobile menu */ }} className="text-gray-700 hover:text-blue-600">
+                <MenuIcon size={24} />
+              </button>
+            </div>
+          </nav>
+
+          {/* Main Content Area */}
+          <main className="flex-grow p-4 md:p-8">
+            {currentPage === 'dashboard' && <DashboardContent />}
+            {currentPage === 'my-requests' && isAuthenticated && userProfile?.role === 'member' && (
+              <section className="bg-white p-6 rounded-lg shadow-md mb-6">
+                <h2 className="text-2xl font-semibold text-gray-800 mb-4">My Posted Problems ({myRequests.length})</h2>
+                {/* Content for My Requests */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {myRequests.length > 0 ? (
+                    myRequests.map(problem => (
+                      <div key={problem.id} className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
+                        <h4 className="text-lg font-medium text-gray-800 mb-1">{problem.title}</h4>
+                        <p className="text-gray-600 text-sm mb-2">{problem.description}</p>
+                        <p className="text-gray-500 text-xs">Status: {problem.status}</p>
+                        <button
+                          onClick={() => { setSelectedProblemId(problem.id); setShowProblemDetailModal(true); }}
+                          className="mt-2 px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600"
+                        >
+                          View Details
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-gray-600">You haven't posted any problems yet.</p>
+                  )}
+                </div>
+              </section>
+            )}
+            {currentPage === 'my-quotes' && isAuthenticated && userProfile?.role === 'provider' && (
+              <section className="bg-white p-6 rounded-lg shadow-md mb-6">
+                <h2 className="text-2xl font-semibold text-gray-800 mb-4">My Submitted Quotes ({myQuotes.length})</h2>
+                {/* Content for My Quotes */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {myQuotes.length > 0 ? (
+                    myQuotes.map(quote => (
+                      <div key={quote.id} className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
+                        <h4 className="text-lg font-medium text-gray-800 mb-1">Quote for: {quote.problem_title}</h4>
+                        <p className="text-gray-600 text-sm mb-2">Amount: R{quote.amount?.toFixed(2)}</p>
+                        <p className="text-gray-500 text-xs">Status: {quote.status}</p>
+                        {/* Add buttons for withdraw/view details if needed */}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-gray-600">You haven't submitted any quotes yet.</p>
+                  )}
+                </div>
+              </section>
+            )}
+            {currentPage === 'admin' && isAuthenticated && userProfile?.role === 'admin' && (
+              <section className="bg-white p-6 rounded-lg shadow-md mb-6">
+                <h2 className="text-2xl font-semibold text-gray-800 mb-4">Admin Panel</h2>
+                {/* Admin content will go here */}
+                <p className="text-gray-700">This section is for admin-specific tasks.</p>
+              </section>
+            )}
+            {currentPage === 'settings' && isAuthenticated && (
+              <section className="bg-white p-6 rounded-lg shadow-md mb-6">
+                  <h2 className="text-2xl font-semibold text-gray-800 mb-4">Settings</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md">
+                          <h3 className="text-xl font-semibold text-gray-700 mb-2">Profile Information</h3>
+                          <p className="text-gray-600">Update your personal details.</p>
+                          <div className="mt-3">
+                              <p className="text-gray-700">Name: {userProfile?.name || stackAuthUser?.name || 'N/A'}</p>
+                              <p className="text-gray-700">Email: {userProfile?.email || stackAuthUser?.email || 'N/A'}</p>
+                              <p className="text-gray-700">Role: {userProfile?.role || 'N/A'}</p>
+                          </div>
+                          <button className="mt-3 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200">
+                              Edit Profile
+                          </button>
+                      </div>
+                      <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md">
+                          <h3 className="text-xl font-semibold text-gray-700 mb-2">Notification Preferences</h3>
+                          <p className="text-gray-600">Configure how you receive alerts for new activity.</p>
+                          <div className="mt-3 flex items-center">
+                              <input type="checkbox" id="email-notifications" className="mr-2" checked={emailNotifications} onChange={(e) => setEmailNotifications(e.target.checked)} />
+                              <label htmlFor="email-notifications" className="text-gray-700">Email notifications</label>
+                          </div>
+                          <div className="mt-2 flex items-center">
+                              <input type="checkbox" id="sms-notifications" className="mr-2" checked={smsNotifications} onChange={(e) => setSmsNotifications(e.target.checked)} />
+                              <label htmlFor="sms-notifications" className="text-gray-700">SMS notifications (coming soon)</label>
+                          </div>
+                      </div>
+                      <div className="p-4 bg-gray-50 rounded-md border border-gray-200 rounded-md">
+                          <h3 className="text-xl font-semibold text-gray-700 mb-2">Data Management</h3>
+                          <p className="text-gray-600">Review and manage your data.</p>
+                          <button onClick={handleExportData} className="mt-3 px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 transition-colors duration-200">
+                              Export My Data
+                          </button>
+                      </div>
+                  </div>
+              </section>
+            )}
+          </main>
+
+          {/* Modals */}
           <PostProblemModal
             isOpen={showPostProblemModal}
             onClose={() => setShowPostProblemModal(false)}
             onPost={handlePostProblem}
-            isPaidMember={userProfile?.is_paid_member || false}
+            isPaidMember={userProfile?.is_paid_member} // Example, assuming userProfile has this
           />
-        )}
-        {showQuoteModal && (
           <QuoteModal
             isOpen={showQuoteModal}
             onClose={() => setShowQuoteModal(false)}
             problem={selectedProblemForQuote}
             onSubmitQuote={handleSubmitQuote}
           />
-        )}
-        {showProblemDetailModal && (
-          <ProblemDetailPage
-            problemId={selectedProblemId}
-            onClose={() => setShowProblemDetailModal(false)}
-            onShowQuoteModal={(problem) => {
-              setSelectedProblemForQuote(problem);
-              setShowQuoteModal(true);
-            }}
-          />
-        )}
-
-        <header className="bg-white shadow-md p-4 flex justify-between items-center">
-          <div className="flex items-center">
-            {branding?.app_logo_url && (
-              <img src={branding.app_logo_url} alt={branding?.app_name || "Logo"} className="h-10 mr-3 rounded-md" />
-            )}
-            <h1 className="text-2xl font-bold text-gray-800">{branding?.app_name || "Mphakathi Online"}</h1>
-          </div>
-          <nav className="hidden md:flex space-x-6">
-            <button onClick={() => setCurrentPage('dashboard')} className="text-gray-700 hover:text-blue-600 flex items-center rounded-md px-3 py-2 transition-colors duration-200">
-              <HomeIcon size={18} className="mr-1" /> Dashboard
-            </button>
-            {userProfile?.role === 'member' && (
-              <button onClick={() => setCurrentPage('my-requests')} className="text-gray-700 hover:text-blue-600 flex items-center rounded-md px-3 py-2 transition-colors duration-200">
-                <FileTextIcon size={18} className="mr-1" /> My Requests
-              </button>
-            )}
-            {userProfile?.role === 'provider' && (
-              <button onClick={() => setCurrentPage('my-quotes')} className="text-gray-700 hover:text-blue-600 flex items-center rounded-md px-3 py-2 transition-colors duration-200">
-                <DollarSignIcon size={18} className="mr-1" /> My Quotes
-              </button>
-            )}
-            <button onClick={() => setCurrentPage('public-problems')} className="text-gray-700 hover:text-blue-600 flex items-center rounded-md px-3 py-2 transition-colors duration-200">
-                <FileTextIcon size={18} className="mr-1" /> All Problems
-            </button>
-            <button onClick={() => setCurrentPage('plans')} className="text-gray-700 hover:text-blue-600 flex items-center rounded-md px-3 py-2 transition-colors duration-200">
-              <PackageIcon size={18} className="mr-1" /> Plans
-            </button>
-            {userProfile?.role === 'admin' && (
-              <button onClick={() => setCurrentPage('admin-tools')} className="text-gray-700 hover:text-blue-600 flex items-center rounded-md px-3 py-2 transition-colors duration-200">
-                <ShieldCheckIcon size={18} className="mr-1" /> Admin
-              </button>
-            )}
-            <button onClick={() => setCurrentPage('settings')} className="text-gray-700 hover:text-blue-600 flex items-center rounded-md px-3 py-2 transition-colors duration-200">
-              <SettingsIcon size={18} className="mr-1" /> Settings
-            </button>
-            {isAuthenticated ? (
-              <button onClick={handleLogout} className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200 flex items-center shadow-md">
-                <LogOutIcon size={18} className="mr-2" /> Logout
-              </button>
-            ) : (
-              <button onClick={handleLogin} className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200 flex items-center shadow-md">
-                <UserIcon size={18} className="mr-2" /> Login
-              </button>
-            )}
-          </nav>
-          <div className="md:hidden">
-            <button className="text-gray-700 p-2 rounded-md hover:bg-gray-200 transition-colors duration-200">
-              <MenuIcon size={24} />
-            </button>
-          </div>
-        </header>
-
-        <main className="p-6 md:p-8 max-w-7xl mx-auto">
-          {currentPage === 'dashboard' && <DashboardContent />}
-
-          {/* Dedicated pages for navigation */}
-          {currentPage === 'public-problems' && (
-            <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-4">All Public Problems ({publicProblems.length})</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {publicProblems.length > 0 ? (
-                  publicProblems.map(problem => (
-                    <div key={problem.id} className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
-                      <h4 className="text-lg font-medium text-gray-800 mb-1">{problem.title}</h4>
-                      <p className="text-gray-600 text-sm mb-2">{problem.description}</p>
-                      <p className="text-gray-500 text-xs">Location: {problem.location} | Status: {problem.status}</p>
-                      <button
-                        onClick={() => { setSelectedProblemId(problem.id); setShowProblemDetailModal(true); }}
-                        className="mt-2 px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600"
-                      >
-                        View Details
-                      </button>
-                      {isAuthenticated && userProfile?.role === 'provider' && problem.status === 'open' && !myQuotes.some(q => q.problem_id === problem.id) && (
-                         <button
-                          onClick={() => { setSelectedProblemForQuote(problem); setShowQuoteModal(true); }}
-                          className="mt-2 ml-2 px-3 py-1 bg-green-500 text-white text-sm rounded-md hover:bg-green-600"
-                        >
-                          Quote
-                        </button>
-                      )}
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-gray-600">No public problems available.</p>
-                )}
-              </div>
-            </section>
+          {showProblemDetailModal && (
+            <ProblemDetailPage
+              problemId={selectedProblemId}
+              onClose={() => setShowProblemDetailModal(false)}
+              onShowQuoteModal={(problem) => { setSelectedProblemForQuote(problem); setShowQuoteModal(true); }}
+            />
           )}
-
-          {currentPage === 'plans' && (
-            <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-4">Our Pricing Plans ({pricingPlans.length})</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {pricingPlans.length > 0 ? (
-                  pricingPlans.map(plan => (
-                    <div key={plan.id} className="p-6 bg-gray-50 rounded-lg border border-gray-200 shadow-md flex flex-col justify-between">
-                      <div>
-                        <h4 className="text-xl font-bold text-blue-700 mb-2">{plan.name}</h4>
-                        <p className="text-gray-700 text-sm mb-3">{plan.description}</p>
-                        <p className="text-2xl font-extrabold text-gray-900 mb-4">{plan.price_display}</p>
-                        <ul className="mt-2 text-gray-600 text-sm list-disc list-inside space-y-1">
-                          {plan.features?.map((feature, idx) => (<li key={idx}>{feature}</li>))}
-                        </ul>
-                      </div>
-                      <button className="mt-6 w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 shadow-sm">
-                        {plan.price_display === 'Contact Us' ? 'Contact Sales' : 'Choose Plan'}
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-gray-600">No pricing plans available at the moment.</p>
-                )}
-              </div>
-            </section>
+          {showConfirmation && (
+            <ConfirmationModal
+              message={confirmationMessage}
+              onConfirm={confirmationAction}
+              onCancel={() => setShowConfirmation(false)}
+            />
           )}
-
-          {userProfile?.role === 'member' && currentPage === 'my-requests' && (
-            <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-4">My Posted Problems ({myRequests.length})</h2>
-              <button
-                onClick={() => setShowPostProblemModal(true)}
-                className="mb-6 px-6 py-3 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 transition-colors duration-200 flex items-center shadow-md"
-              >
-                <PlusCircleIcon size={20} className="mr-2" /> Post a New Problem
-              </button>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {myRequests.length > 0 ? (
-                  myRequests.map(problem => (
-                    <div key={problem.id} className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
-                      <h4 className="text-lg font-medium text-gray-800 mb-1">{problem.title}</h4>
-                      <p className="text-gray-600 text-sm mb-2">{problem.description}</p>
-                      <p className="text-gray-500 text-xs">Status: {problem.status}</p>
-                      <button
-                        onClick={() => { setSelectedProblemId(problem.id); setShowProblemDetailModal(true); }}
-                        className="mt-2 px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600"
-                      >
-                        View Details
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-gray-600">You haven't posted any problems yet.</p>
-                )}
-              </div>
-            </section>
-          )}
-
-          {userProfile?.role === 'provider' && currentPage === 'my-quotes' && (
-            <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-4">My Submitted Quotes ({myQuotes.length})</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {myQuotes.length > 0 ? (
-                  myQuotes.map(quote => (
-                    <div key={quote.id} className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
-                      <h4 className="text-lg font-medium text-gray-800 mb-1">Quote for Problem ID: {quote.problem_id}</h4>
-                      <p className="font-semibold text-lg text-blue-700">Amount: ZAR{quote.amount?.toFixed(2)}</p>
-                      <p className="text-gray-600 text-sm mb-2">{quote.description}</p>
-                      <p className="text-gray-500 text-xs">Status: {quote.status}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-gray-600">You haven't submitted any quotes yet.</p>
-                )}
-              </div>
-            </section>
-          )}
-
-          {isAuthenticated && currentPage === 'settings' && (
-            <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-4">User Settings</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
-                  <h3 className="text-xl font-semibold text-gray-700 mb-2">Notification Preferences</h3>
-                  <p className="text-gray-600">Configure how you receive alerts for new activity.</p>
-                  <div className="mt-3 flex items-center">
-                    <input
-                      type="checkbox"
-                      id="email-notifications"
-                      className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      checked={emailNotifications}
-                      onChange={(e) => setEmailNotifications(e.target.checked)}
-                    />
-                    <label htmlFor="email-notifications" className="text-gray-700">Email notifications</label>
-                  </div>
-                  <div className="mt-2 flex items-center">
-                    <input
-                      type="checkbox"
-                      id="sms-notifications"
-                      className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      checked={smsNotifications}
-                      onChange={(e) => setSmsNotifications(e.target.checked)}
-                    />
-                    <label htmlFor="sms-notifications" className="text-gray-700">SMS notifications (coming soon)</label>
-                  </div>
-                </div>
-                <div className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
-                  <h3 className="text-xl font-semibold text-gray-700 mb-2">Data Management</h3>
-                  <p className="text-gray-600">Review and manage your personal data.</p>
-                  <button
-                    onClick={handleExportData}
-                    className="mt-3 px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 transition-colors duration-200 shadow-md"
-                  >
-                    Export My Data
-                  </button>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {userProfile?.role === 'admin' && currentPage === 'admin-tools' && (
-            <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-4">Admin Tools</h2>
-               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <button
-                  onClick={() => setCurrentPage('admin-branding')}
-                  className="p-4 bg-blue-100 border border-blue-200 rounded-md hover:bg-blue-200 flex items-center shadow-sm"
-                >
-                  <PaintbrushIcon size={20} className="mr-2" /> Manage Branding
-                </button>
-                <button
-                  onClick={() => setCurrentPage('admin-pricing')}
-                  className="p-4 bg-green-100 border border-green-200 rounded-md hover:bg-green-200 flex items-center shadow-sm"
-                >
-                  <DollarSignIcon size={20} className="mr-2" /> Manage Pricing
-                </button>
-                 <button
-                  onClick={() => setCurrentPage('admin-problems')}
-                  className="p-4 bg-purple-100 border border-purple-200 rounded-md hover:bg-purple-200 flex items-center shadow-sm"
-                >
-                  <FileTextIcon size={20} className="mr-2" /> Manage All Problems
-                </button>
-                {/* Add more admin buttons as needed */}
-              </div>
-            </section>
-          )}
-
-          {userProfile?.role === 'admin' && currentPage === 'admin-branding' && (
-            <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-4">Admin: Manage Branding</h2>
-              <p className="text-gray-700">Here you would implement forms/logic to update app name, logo, etc.</p>
-              <button onClick={() => setCurrentPage('admin-tools')} className="mt-4 px-4 py-2 bg-gray-300 rounded-md">Back to Admin Tools</button>
-            </section>
-          )}
-
-          {userProfile?.role === 'admin' && currentPage === 'admin-pricing' && (
-            <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-4">Admin: Manage Pricing Plans</h2>
-              <p className="text-gray-700">Here you would implement forms/logic to add/edit/delete pricing plans.</p>
-              <button onClick={() => setCurrentPage('admin-tools')} className="mt-4 px-4 py-2 bg-gray-300 rounded-md">Back to Admin Tools</button>
-            </section>
-          )}
-
-          {userProfile?.role === 'admin' && currentPage === 'admin-problems' && (
-            <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-4">Admin: Manage All Problems ({publicProblems.length})</h2>
-              <p className="text-gray-700 mb-4">Overview of all problems in the system.</p>
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {publicProblems.length > 0 ? (
-                  publicProblems.map(problem => (
-                    <div key={problem.id} className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
-                      <h4 className="text-lg font-medium text-gray-800 mb-1">{problem.title}</h4>
-                      <p className="text-gray-600 text-sm mb-2">{problem.description}</p>
-                      <p className="text-gray-500 text-xs">Location: {problem.location} | Status: {problem.status}</p>
-                      <button
-                        onClick={() => { setSelectedProblemId(problem.id); setShowProblemDetailModal(true); }}
-                        className="mt-2 px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600"
-                      >
-                        View Details (Admin)
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-gray-600">No problems in the system.</p>
-                )}
-              </div>
-              <button onClick={() => setCurrentPage('admin-tools')} className="mt-4 px-4 py-2 bg-gray-300 rounded-md">Back to Admin Tools</button>
-            </section>
-          )}
-
-        </main>
-
-        <footer className="bg-gray-800 text-white p-4 text-center">
-          <p>&copy; {new Date().getFullYear()} Mphakathi Online. All rights reserved.</p>
-        </footer>
-      </div>
-    </AppContext.Provider>
+        </div>
+      </AppContext.Provider>
+    </StackAuthProvider>
   );
 };
 
