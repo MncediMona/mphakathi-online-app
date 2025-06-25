@@ -1,13 +1,14 @@
 // app/layout.js
 "use client"; // This component needs to be a Client Component
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Inter } from 'next/font/google';
 import {
   HomeIcon, UserIcon, FileTextIcon,
   LogOutIcon, MenuIcon, ShieldCheckIcon, SettingsIcon, DollarSignIcon
 } from 'lucide-react';
-import { useUser, useStackApp } from '@stackframe/stack'; // Keep these imports for hooks
+// Removed direct use of useUser, useStackApp from here.
+// They are handled within StackAuthProviderWrapper and then AppContext.
 import { AppProvider, AppContext } from '../lib/appContext';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -18,21 +19,31 @@ import "../src/index.css"; // Ensure your global CSS is imported here (e.g., Tai
 const inter = Inter({ subsets: ['latin'] });
 
 export default function RootLayout({ children }) {
-  // Use Stack Auth's hooks directly for authentication state within the layout
-  // These hooks (`useUser`, `useStackApp`) *must* be used within a StackProvider.
-  // So, their values will be truly available only after StackProviderWrapper has mounted.
-  // For initial SSR, `isAuthenticated` might be false, and `user` null.
-  const { isAuthenticated, user, isLoading: stackAuthLoading } = useUser();
-  const stackApp = useStackApp();
-
-  // Access userProfile from AppContext
-  const { userProfile } = React.useContext(AppContext);
+  // Access authentication state from AppContext
+  // This will be valid only once AppProvider is mounted on the client.
+  const { isAuthenticated, user: stackAuthUser, userProfile, login, logout, isLoading: appLoading } = React.useContext(AppContext);
 
   const pathname = usePathname();
 
-  // We no longer need the explicit `if (stackAuthLoading)` here because
-  // StackAuthProviderWrapper handles the loading state before providing context.
-  // The `AppProvider` will also have its own `isLoading` state.
+  // Render a loading state for the layout itself while auth/app data is loading.
+  // This ensures we don't try to render parts of the UI that depend on auth state
+  // before it's available.
+  if (appLoading) {
+    return (
+      <html lang="en">
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>Mphakathi Online</title>
+        </head>
+        <body className={inter.className}>
+          <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+            <p className="text-xl text-gray-700">Loading application...</p>
+          </div>
+        </body>
+      </html>
+    );
+  }
+
 
   return (
     <html lang="en">
@@ -44,6 +55,7 @@ export default function RootLayout({ children }) {
         {/* Wrap the entire app content with StackAuthProviderWrapper */}
         <StackAuthProviderWrapper>
           {/* AppProvider wraps children to provide app-wide context */}
+          {/* This AppProvider will now be inside the StackProvider from the Wrapper */}
           <AppProvider>
             <div className="min-h-screen bg-gray-100 flex flex-col">
               {/* Navigation */}
@@ -77,11 +89,11 @@ export default function RootLayout({ children }) {
                     </Link>
                   )}
                   {isAuthenticated ? (
-                    <button onClick={stackApp.logout} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center">
+                    <button onClick={logout} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center">
                       <LogOutIcon size={20} className="mr-1" /> Logout
                     </button>
                   ) : (
-                    <button onClick={stackApp.login} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center">
+                    <button onClick={login} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center">
                       <UserIcon size={20} className="mr-1" /> Login
                     </button>
                   )}
