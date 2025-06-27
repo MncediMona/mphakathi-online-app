@@ -1,33 +1,26 @@
 // app/layout.js
-"use client"; // This component needs to be a Client Component
+"use client";
 
 import React, { useState } from 'react';
-import { Inter } from 'next/font/google';
+// import { Inter } from 'next/font/google'; // <--- COMMENT OUT THIS LINE
 import {
   HomeIcon, UserIcon, FileTextIcon,
   LogOutIcon, MenuIcon, ShieldCheckIcon, SettingsIcon, DollarSignIcon
 } from 'lucide-react';
-// Removed direct use of useUser, useStackApp from here.
-// They are handled within StackAuthProviderWrapper and then AppContext.
 import { AppProvider, AppContext } from '../lib/appContext';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import StackAuthProviderWrapper from './components/StackAuthProviderWrapper'; // Import the new wrapper
+import StackAuthProviderWrapper from './components/StackAuthProviderWrapper';
 
-import "../src/index.css"; // Ensure your global CSS is imported here (e.g., Tailwind CSS)
+import "../src/index.css";
 
-const inter = Inter({ subsets: ['latin'] });
+// const inter = Inter({ subsets: ['latin'] }); // <--- COMMENT OUT THIS LINE
 
 export default function RootLayout({ children }) {
-  // Access authentication state from AppContext
-  // This will be valid only once AppProvider is mounted on the client.
   const { isAuthenticated, user: stackAuthUser, userProfile, login, logout, isLoading: appLoading } = React.useContext(AppContext);
 
   const pathname = usePathname();
 
-  // Render a loading state for the layout itself while auth/app data is loading.
-  // This ensures we don't try to render parts of the UI that depend on auth state
-  // before it's available.
   if (appLoading) {
     return (
       <html lang="en">
@@ -35,7 +28,8 @@ export default function RootLayout({ children }) {
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
           <title>Mphakathi Online</title>
         </head>
-        <body className={inter.className}>
+        {/* <body className={inter.className}> */} {/* <--- COMMENT OUT THIS PART */}
+        <body>
           <div className="min-h-screen bg-gray-100 flex items-center justify-center">
             <p className="text-xl text-gray-700">Loading application...</p>
           </div>
@@ -44,18 +38,17 @@ export default function RootLayout({ children }) {
     );
   }
 
-
   return (
     <html lang="en">
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Mphakathi Online</title>
       </head>
-      <body className={inter.className}>
+      {/* <body className={inter.className}> */} {/* <--- COMMENT OUT THIS PART */}
+      <body>
         {/* Wrap the entire app content with StackAuthProviderWrapper */}
         <StackAuthProviderWrapper>
           {/* AppProvider wraps children to provide app-wide context */}
-          {/* This AppProvider will now be inside the StackProvider from the Wrapper */}
           <AppProvider>
             <div className="min-h-screen bg-gray-100 flex flex-col">
               {/* Navigation */}
@@ -67,7 +60,6 @@ export default function RootLayout({ children }) {
                   <Link href="/" className={`text-gray-700 hover:text-blue-600 flex items-center ${pathname === '/' ? 'text-blue-600 font-semibold' : ''}`}>
                     <HomeIcon size={20} className="mr-1" /> Dashboard
                   </Link>
-                  {/* Conditional rendering for links based on authentication and userProfile role */}
                   {isAuthenticated && userProfile?.role === 'member' && (
                     <Link href="/my-requests" className={`text-gray-700 hover:text-blue-600 flex items-center ${pathname === '/my-requests' ? 'text-blue-600 font-semibold' : ''}`}>
                       <FileTextIcon size={20} className="mr-1" /> My Requests
