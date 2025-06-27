@@ -1,18 +1,10 @@
 // app/layout.js
-"use client"; // This component needs to be a Client Component
-
 import React from 'react';
-// Removed Inter font and MenuIcon import from here
-// import { Inter } from 'next/font/google';
-// import { MenuIcon } from 'lucide-react'; // <-- REMOVE THIS LINE
-
 import { AppProvider } from '../lib/appContext';
 import StackAuthProviderWrapper from './components/StackAuthProviderWrapper';
-import AuthNav from './components/AuthNav'; // Import the new AuthNav component
+import ClientNavWrapper from './components/ClientNavWrapper'; // New client component
 
-import "../src/index.css"; // Ensure your global CSS is imported here
-
-// const inter = Inter({ subsets: ['latin'] });
+import "./globals.css"; // Updated path - adjust as needed
 
 export default function RootLayout({ children }) {
   return (
@@ -25,19 +17,12 @@ export default function RootLayout({ children }) {
         <StackAuthProviderWrapper>
           <AppProvider>
             <div className="min-h-screen bg-gray-100 flex flex-col">
-              {/* Navigation */}
+              {/* Navigation - wrapped in client component */}
               <nav className="bg-white shadow-md p-4 flex justify-between items-center sticky top-0 z-40">
                 <div className="flex items-center">
                   <h1 className="text-2xl font-bold text-gray-800">Mphakathi Online</h1>
                 </div>
-                {/* Render the client-only AuthNav component */}
-                <AuthNav />
-                {/* The mobile menu button (which uses MenuIcon) will now be handled inside AuthNav or a new client-only component */}
-                {/* <div className="md:hidden">
-                  <button onClick={() => { /* Toggle mobile menu */ }} className="text-gray-700 hover:text-blue-600">
-                    <MenuIcon size={24} />
-                  </button>
-                </div> */}
+                <ClientNavWrapper />
               </nav>
 
               <main className="flex-grow p-4 md:p-8">
