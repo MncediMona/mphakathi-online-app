@@ -6,29 +6,34 @@ import { StackProvider } from '@stackframe/stack';
 import { getStackClientApp } from '../../lib/stack';
 
 export default function StackAuthProviderWrapper({ children }) {
-  const [isClient, setIsClient] = useState(false);
-  const stackClientApp = getStackClientApp(); // Get the instance (might be null on server)
+  const [isReady, setIsReady] = useState(false);
+  const [appInstance, setAppInstance] = useState(null);
 
   useEffect(() => {
-    // This effect runs only once, after the component mounts on the client
-    setIsClient(true);
-  }, []);
+    const app = getStackClientApp();
+    if (app) {
+      setAppInstance(app);
+      setIsReady(true);
+      // console.log("StackAuthProviderWrapper: StackClientApp instance is ready.");
+    } else {
+      // console.log("StackAuthProviderWrapper: StackClientApp instance not yet available or keys missing.");
+      // If it's not available, we might want to re-check after a short delay
+      // or just wait for a re-render if dependencies change.
+      // For now, let's just rely on the initial check.
+    }
+  }, []); // Empty dependency array means this runs once on mount
 
-  // During SSR or initial client render before useEffect runs, or if stackClientApp is null
-  if (!isClient || !stackClientApp) {
-    // Render a minimal placeholder or null on the server/during initial hydration
-    // This prevents React from trying to hydrate a StackProvider that isn't fully ready.
+  if (!isReady || !appInstance) {
+    // Render a loading state or null while StackClientApp is not ready
     return (
       <div className="flex items-center justify-center min-h-screen">
-        {/* You can add a loading spinner or message here */}
-        <p className="text-gray-500">Loading authentication services...</p>
+        <p className="text-gray-500">Initializing authentication...</p>
       </div>
     );
   }
 
-  // Only render StackProvider when we are definitely on the client and have a valid app instance
   return (
-    <StackProvider app={stackClientApp}>
+    <StackProvider app={appInstance}>
       {children}
     </StackProvider>
   );
