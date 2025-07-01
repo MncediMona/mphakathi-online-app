@@ -1,31 +1,20 @@
-# netlify.toml
+    [build]
+      command = "npm run build"
+      publish = "out" # This should be 'out' when using output: 'export' in next.config.js
+      functions = "netlify/functions" # Assuming your functions are here
 
-[build]
-  command = "npm run build"
-  publish = ".next" # Next.js outputs to .next by default
-  functions = "netlify/functions" # Your existing Netlify Functions directory
+    [[redirects]]
+      from = "/api/*"
+      to = "/.netlify/functions/:splat"
+      status = 200
+      force = true
+    [build]
+      command = "npm run build"
+      publish = "out" # This should be 'out' when using output: 'export' in next.config.js
+      functions = "netlify/functions" # Assuming your functions are here
 
-[dev]
-  command = "npm run dev"
-  port = 8888
-  targetPort = 3000
-  publish = ".next"
-  functions = "netlify/functions"
-  framework = "#custom"
-  host = "0.0.0.0"
-
-# Redirects are often handled by Netlify's Next.js build plugin automatically,
-# but keeping the API rewrite is still good practice for direct function calls.
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-  force = true
-
-# This is often not needed for Next.js App Router as it handles its own routing.
-# However, for pure static assets or if you need a true fallback to index.html for some reason,
-# you might keep it. For a standard Next.js app, the routing is handled by Next.js itself.
-# [[redirects]]
-#   from = "/*"
-#   to = "/index.html"
-#   status = 200
+    [[redirects]]
+      from = "/api/*"
+      to = "/.netlify/functions/:splat"
+      status = 200
+      force = true
