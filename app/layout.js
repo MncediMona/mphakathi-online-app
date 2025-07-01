@@ -1,10 +1,15 @@
 // app/layout.js
+"use client"; // This component needs to be a Client Component
+
 import React from 'react';
+// Removed Inter font and MenuIcon import from here
+// import { Inter } from 'next/font/google';
+
 import { AppProvider } from '../lib/appContext';
 import StackAuthProviderWrapper from './components/StackAuthProviderWrapper';
-import ClientNavWrapper from './components/ClientNavWrapper'; // New client component
+import AuthNav from './components/AuthNav'; // THIS MUST BE './components/AuthNav'
 
-import "./globals.css"; // Updated path - adjust as needed
+import "../src/index.css"; // THIS MUST BE '../src/index.css'
 
 export default function RootLayout({ children }) {
   return (
@@ -17,12 +22,14 @@ export default function RootLayout({ children }) {
         <StackAuthProviderWrapper>
           <AppProvider>
             <div className="min-h-screen bg-gray-100 flex flex-col">
-              {/* Navigation - wrapped in client component */}
+              {/* Navigation */}
               <nav className="bg-white shadow-md p-4 flex justify-between items-center sticky top-0 z-40">
                 <div className="flex items-center">
                   <h1 className="text-2xl font-bold text-gray-800">Mphakathi Online</h1>
                 </div>
-                <ClientNavWrapper />
+                {/* Render the client-only AuthNav component */}
+                <AuthNav />
+                {/* The mobile menu button logic is now fully handled within AuthNav.js */}
               </nav>
 
               <main className="flex-grow p-4 md:p-8">
