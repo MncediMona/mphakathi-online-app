@@ -12,7 +12,10 @@
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.7",
     "eslint": "^8.57.0",
-    "@tailwindcss/postcss": "^4.0.0-alpha.12"
+    "@tailwindcss/postcss": "^4.0.0-alpha.12",
+    "typescript": "^5.x.x",
+    "@types/react": "^18.x.x",
+    "@types/node": "^20.x.x"
   },
   "scripts": {
     "dev": "next dev",
