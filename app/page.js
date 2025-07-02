@@ -1,5 +1,5 @@
 // app/page.js
-"use client"; // Ensure this is a client component
+"use client";
 
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../lib/appContext'; // Correct path
@@ -42,7 +42,7 @@ const HomePage = () => {
       {!isAuthenticated && (
         <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6" role="alert">
           <p className="font-bold">Join Us!</p>
-          <p>Login to request services or provide quotes. It&apos;s quick and easy!</p> {/* Fixed here */}
+          <p>Login to request services or provide quotes. It&apos;s quick and easy!</p>
           <button onClick={login} className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
             Login
           </button>
@@ -54,7 +54,7 @@ const HomePage = () => {
           <p className="font-bold">Welcome back, {userProfile.name || userProfile.email}!</p>
           <p>Your role: <span className="font-semibold capitalize">{userProfile.role}</span></p>
           {userProfile.role === 'member' && (
-            <p className="mt-2">Ready to request a service? Click the &quot;New Request&quot; button!</p> // Fixed here
+            <p className="mt-2">Ready to request a service? Click the &quot;New Request&quot; button!</p>
           )}
           {userProfile.role === 'provider' && (
             <p className="mt-2">Check out the latest service requests to provide your quotes!</p>

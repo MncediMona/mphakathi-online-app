@@ -3,10 +3,10 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { useUser, useStackApp } from '@stackframe/stack';
-import { useStackAuthReady } from '../app/components/StackAuthIsolation'; // Correct relative import
+import { useStackAuthReady } from '../app/components/StackAuthIsolation';
 
 interface AppContextType {
-  isAuthenticated: boolean; // Added isAuthenticated
+  isAuthenticated: boolean;
   user: any;
   isLoading: boolean;
   error: string | null;
@@ -23,14 +23,13 @@ interface AppContextType {
   fetchMyQuotes: () => Promise<void>;
 }
 
-const AppContext = createContext<AppContextType | undefined>(undefined); // Allow undefined initially
+const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8888';
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const { isStackReady, stackError } = useStackAuthReady();
 
-  // CALL HOOKS UNCONDITIONALLY AT THE TOP LEVEL
   const { isAuthenticated, user: stackAuthUser, isLoading: isStackAuthLoading } = useUser();
   const stackApp = useStackApp();
 
@@ -42,7 +41,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [myRequests, setMyRequests] = useState<any[]>([]);
   const [myQuotes, setMyQuotes] = useState<any[]>([]);
 
-  // Memoized login/logout functions
   const login = useCallback(() => {
     if (stackApp?.login) {
       stackApp.login();
@@ -60,7 +58,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [stackApp]);
 
 
-  // Data fetching functions
   const fetchBranding = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-branding`);
@@ -95,7 +92,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const fetchOrCreateUserProfile = useCallback(async () => {
-    // Only proceed if Stack Auth is ready and user is authenticated
     if (!isStackReady || stackError || !isAuthenticated || !stackAuthUser?.id) {
       setUserProfile(null);
       return;
@@ -121,7 +117,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       console.error("Failed to fetch or create user profile:", error);
       setUserProfile(null);
     }
-  }, [isAuthenticated, stackAuthUser, isStackReady, stackError]); // Added isStackReady, stackError to dependencies
+  }, [isAuthenticated, stackAuthUser, isStackReady, stackError]);
 
   const fetchMyRequests = useCallback(async () => {
     if (!isStackReady || stackError || !isAuthenticated || !userProfile?.id) {
@@ -142,7 +138,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       console.error("Failed to fetch my requests:", error);
       setMyRequests([]);
     }
-  }, [isAuthenticated, userProfile?.id, stackAuthUser, isStackReady, stackError]); // Added isStackReady, stackError
+  }, [isAuthenticated, userProfile?.id, stackAuthUser, isStackReady, stackError]);
 
   const fetchMyQuotes = useCallback(async () => {
     if (!isStackReady || stackError || !isAuthenticated || !userProfile?.id || userProfile?.role !== 'provider') {
@@ -163,10 +159,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       console.error("Failed to fetch my quotes:", error);
       setMyQuotes([]);
     }
-  }, [isAuthenticated, userProfile?.id, userProfile?.role, stackAuthUser, isStackReady, stackError]); // Added isStackReady, stackError
+  }, [isAuthenticated, userProfile?.id, userProfile?.role, stackAuthUser, isStackReady, stackError]);
 
 
-  // Effects for data loading
   useEffect(() => {
     const loadAllPublicData = async () => {
       setAppDataLoading(true);
@@ -177,7 +172,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [fetchBranding, fetchPlans, fetchPublicProblems]);
 
   useEffect(() => {
-    // Only fetch user profile if isAuthenticated is true AND Stack Auth context is ready
     if (isAuthenticated && isStackReady && !stackError) {
       fetchOrCreateUserProfile();
     } else {
@@ -207,8 +201,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     fetchMyQuotes,
     isAuthenticated,
     user: stackAuthUser,
-    isLoading: isStackAuthLoading || appDataLoading || !isStackReady, // Overall loading includes StackAuthReady
-    error: stackError, // Pass the stackError through context
+    isLoading: isStackAuthLoading || appDataLoading || !isStackReady,
+    error: stackError,
     login,
     logout,
   };

@@ -51,8 +51,6 @@ export function StackAuthIsolation({ children }: StackAuthIsolationProps) {
           throw new Error('Stack Auth environment variables not configured');
         }
 
-        // We don't need to create a testStack instance here, getStackClientApp will handle it
-        // and its success implies the environment is ready for StackProvider.
         setIsStackReady(true);
       } catch (error) {
         console.error('Stack Auth initialization failed:', error);

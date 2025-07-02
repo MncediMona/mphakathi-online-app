@@ -1,5 +1,5 @@
 // app/my-quotes/page.js
-"use client"; // Ensure this is a client component
+"use client";
 
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../../lib/appContext'; // Correct path
@@ -34,14 +34,14 @@ const MyQuotesPage = () => {
   }
 
   if (!userProfile || userProfile.role !== 'provider') {
-    return <div className="text-center py-8 text-gray-600">You don&apos;t have access to view quotes as a provider.</div>; // Fixed here
+    return <div className="text-center py-8 text-gray-600">You don&apos;t have access to view quotes as a provider.</div>;
   }
 
   return (
     <div className="container mx-auto p-4">
       <h1 className="text-3xl font-bold mb-6 text-gray-800">My Quotes</h1>
       {myQuotes.length === 0 ? (
-        <p className="text-gray-600">You haven&apos;t provided any quotes yet.</p> // Fixed here
+        <p className="text-gray-600">You haven&apos;t provided any quotes yet.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {myQuotes.map((quote) => (

@@ -8,11 +8,11 @@ import {
     HomeIcon, UserIcon, FileTextIcon,
     LogOutIcon, MenuIcon, ShieldCheckIcon, SettingsIcon, DollarSignIcon
 } from 'lucide-react';
-import { AppContext } from '../../lib/appContext'; // Relative path
+import { useAppContext } from '../../lib/appContext'; // Correct: import useAppContext hook
 import { useStackAuthReady } from './StackAuthIsolation'; // Relative path
 
 export default function AuthNav() {
-    const { isAuthenticated, userProfile, login, logout, isLoading: appLoading } = React.useContext(AppContext);
+    const { isAuthenticated, userProfile, login, logout, isLoading: appLoading } = useAppContext(); // Use the hook
     const { isStackReady, stackError } = useStackAuthReady();
     const pathname = usePathname();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
