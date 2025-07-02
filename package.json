@@ -16,7 +16,7 @@
     "typescript": "^5.x.x",
     "@types/react": "^18.x.x",
     "@types/node": "^20.x.x",
-    "eslint-config-next": "^14.2.4"  // ADD THIS LINE
+    "eslint-config-next": "^14.2.4"
   },
   "scripts": {
     "dev": "next dev",
