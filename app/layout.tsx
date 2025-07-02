@@ -2,12 +2,14 @@
 "use client";
 
 import React from 'react';
-import { AppProvider } from '../lib/appContext'; // Relative path
-import AuthNav from './components/AuthNav'; // Relative path
+import { AppProvider } from '../lib/appContext';
+import AuthNav from './components/AuthNav';
 
-import { StackAuthIsolation, SafeStackProvider } from './components/StackAuthIsolation'; // Relative path
+// Correct imports for the Stack Auth isolation components
+import { StackAuthIsolation } from './components/StackAuthIsolation'; // StackAuthIsolation from its file
+import { SafeStackProvider } from './components/SafeStackProvider'; // SafeStackProvider from its own file
 
-import "../src/index.css"; // Relative path
+import "../src/index.css";
 
 export default function RootLayout({
   children,
