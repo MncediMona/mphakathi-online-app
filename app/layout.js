@@ -1,15 +1,15 @@
 // app/layout.js
-"use client"; // This component needs to be a Client Component
+"use client";
 
 import React from 'react';
-// Removed Inter font and MenuIcon import from here
-// import { Inter } from 'next/font/google';
+// import { Inter } from 'next/font/google'; // Commented out
+// const inter = Inter({ subsets: ['latin'] }); // Commented out
 
 import { AppProvider } from '../lib/appContext';
 import StackAuthProviderWrapper from './components/StackAuthProviderWrapper';
-import AuthNav from './components/AuthNav'; // THIS MUST BE './components/AuthNav'
+import AuthNav from './components/AuthNav';
 
-import "../src/index.css"; // THIS MUST BE '../src/index.css'
+import "../src/index.css";
 
 export default function RootLayout({ children }) {
   return (
@@ -29,7 +29,6 @@ export default function RootLayout({ children }) {
                 </div>
                 {/* Render the client-only AuthNav component */}
                 <AuthNav />
-                {/* The mobile menu button logic is now fully handled within AuthNav.js */}
               </nav>
 
               <main className="flex-grow p-4 md:p-8">
