@@ -8,8 +8,8 @@ import {
     HomeIcon, UserIcon, FileTextIcon,
     LogOutIcon, MenuIcon, ShieldCheckIcon, SettingsIcon, DollarSignIcon
 } from 'lucide-react';
-import { AppContext } from '../../lib/appContext'; // Relative to app/components/
-import { useStackAuthReady } from './StackAuthIsolation'; // Correct relative path: './StackAuthIsolation'
+import { AppContext } from '../../lib/appContext'; // Relative path
+import { useStackAuthReady } from './StackAuthIsolation'; // Relative path
 
 export default function AuthNav() {
     const { isAuthenticated, userProfile, login, logout, isLoading: appLoading } = React.useContext(AppContext);

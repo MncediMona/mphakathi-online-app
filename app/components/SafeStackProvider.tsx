@@ -2,9 +2,9 @@
 'use client';
 
 import { ReactNode } from 'react';
-import { useStackAuthReady } from './StackAuthIsolation';
-import { StackProvider } from '@stackframe/stack'; // Import StackProvider
-import { getStackClientApp } from '../../lib/stack'; // Import the client app getter
+import { useStackAuthReady } from './StackAuthIsolation'; // Relative path
+import { StackProvider } from '@stackframe/stack';
+import { getStackClientApp } from '../../lib/stack'; // Relative path
 
 interface SafeStackProviderProps {
   children: ReactNode;
@@ -12,9 +12,10 @@ interface SafeStackProviderProps {
 
 export function SafeStackProvider({ children }: SafeStackProviderProps) {
   const { isStackReady, stackError } = useStackAuthReady();
-  const stackClientApp = getStackClientApp(); // Get the client app instance
+  const stackClientApp = getStackClientApp();
 
   if (stackError) {
+    console.warn('Stack Auth Error:', stackError);
     return (
       <div className="p-4 bg-red-50 border border-red-200 rounded">
         <h2 className="text-red-800 font-semibold">Authentication Error</h2>
@@ -26,19 +27,17 @@ export function SafeStackProvider({ children }: SafeStackProviderProps) {
     );
   }
 
-  // Show loading while Stack Auth environment is not ready OR if StackClientApp instance is null
   if (!isStackReady || !stackClientApp) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-2 text-gray-600">Initializing authentication...</p>
         </div>
       </div>
     );
   }
 
-  // Only render StackProvider when completely ready and app instance is available
   return (
     <StackProvider app={stackClientApp}>
       {children}
