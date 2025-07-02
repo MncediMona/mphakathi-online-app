@@ -2,11 +2,11 @@
 "use client";
 
 import React from 'react';
-import { AppProvider } from '@/lib/appContext'; // Changed to absolute import
-import AuthNav from '@/app/components/AuthNav'; // Changed to absolute import
+import { AppProvider } from '../lib/appContext'; // Relative to app/
+import AuthNav from './components/AuthNav'; // Correct relative path: './components/AuthNav'
 
 // Correct import for the new Stack Auth isolation components
-import { StackAuthIsolation, SafeStackProvider } from '@/app/components/StackAuthIsolation'; // Changed to absolute import
+import { StackAuthIsolation, SafeStackProvider } from './components/StackAuthIsolation'; // Correct relative path: './components/StackAuthIsolation'
 
 import "../src/index.css"; // This remains relative as it's outside the root for @/
 
