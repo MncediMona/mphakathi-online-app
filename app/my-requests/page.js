@@ -1,82 +1,73 @@
 // app/my-requests/page.js
-"use client";
+"use client"; // Ensure this is a client component
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { AppContext } from '../../lib/appContext'; // Adjust path as needed
-import { ProblemDetailPage } from '../components/ProblemDetailPage'; // Re-use existing modal
-import { DollarSignIcon } from 'lucide-react'; // Example icon
+import React, { useState, useEffect } from 'react';
+import { useAppContext } from '../../lib/appContext'; // Correct path
+import QuoteModal from '../components/QuoteModal'; // Import QuoteModal
 
-export default function MyRequestsPage() {
-  const { isAuthenticated, userProfile, myRequests, fetchMyRequests, isLoading } = React.useContext(AppContext);
-  const [showProblemDetailModal, setShowProblemDetailModal] = useState(false);
-  const [selectedProblemId, setSelectedProblemId] = useState(null);
-  const [showQuoteModal, setShowQuoteModal] = useState(false); // For if a provider is viewing their quotes on a problem they posted
-  const [selectedProblemForQuote, setSelectedProblemForQuote] = useState(null); // For if a provider is viewing their quotes on a problem they posted
+const MyRequestsPage = () => {
+  const { myRequests, isLoading, error, userProfile, fetchMyRequests } = useAppContext();
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Re-fetch on mount if not loading
   useEffect(() => {
-    if (isAuthenticated && userProfile?.id && !isLoading) {
+    if (userProfile?.role === 'member' && !isLoading && !error) {
       fetchMyRequests();
     }
-  }, [isAuthenticated, userProfile?.id, fetchMyRequests, isLoading]);
+  }, [userProfile, isLoading, error, fetchMyRequests]);
 
+  const handleViewRequest = (request) => {
+    setSelectedRequest(request);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedRequest(null);
+  };
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[calc(100vh-100px)]">
-        <div className="text-xl font-semibold text-gray-700">Loading your requests...</div>
-      </div>
-    );
+    return <div className="text-center py-8">Loading requests...</div>;
   }
 
-  if (!isAuthenticated || userProfile?.role !== 'member') {
-    return (
-      <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-4">Access Denied</h2>
-        <p className="text-gray-700">You must be logged in as a member to view your requests.</p>
-      </section>
-    );
+  if (error) {
+    return <div className="text-center py-8 text-red-600">Error: {error}</div>;
+  }
+
+  if (!userProfile || userProfile.role !== 'member') {
+    return <div className="text-center py-8 text-gray-600">You don&apos;t have access to view requests as a member.</div>; // Fixed here
   }
 
   return (
-    <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-      <h2 className="text-2xl font-semibold text-gray-800 mb-4">My Posted Problems ({myRequests.length})</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {myRequests.length > 0 ? (
-          myRequests.map(problem => (
-            <div key={problem.id} className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
-              <h4 className="text-lg font-medium text-gray-800 mb-1">{problem.title}</h4>
-              <p className="text-gray-600 text-sm mb-2">{problem.description}</p>
-              <p className="text-gray-500 text-xs">Status: {problem.status}</p>
+    <div className="container mx-auto p-4">
+      <h1 className="text-3xl font-bold mb-6 text-gray-800">My Requests</h1>
+      {myRequests.length === 0 ? (
+        <p className="text-gray-600">You haven&apos;t made any requests yet.</p> // Fixed here
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {myRequests.map((request) => (
+            <div key={request.id} className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
+              <h2 className="text-xl font-semibold mb-2 text-gray-700">Request: {request.title}</h2>
+              <p className="text-gray-600">Status: <span className={`font-medium ${
+                request.status === 'pending' ? 'text-yellow-600' :
+                request.status === 'completed' ? 'text-green-600' :
+                'text-red-600'
+              }`}>{request.status}</span></p>
               <button
-                onClick={() => { setSelectedProblemId(problem.id); setShowProblemDetailModal(true); }}
-                className="mt-2 px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600"
+                onClick={() => handleViewRequest(request)}
+                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition duration-200"
               >
                 View Details
               </button>
             </div>
-          ))
-        ) : (
-          <p className="text-gray-600">You haven't posted any problems yet.</p>
-        )}
-      </div>
-
-      {showProblemDetailModal && (
-        <ProblemDetailPage
-          problemId={selectedProblemId}
-          onClose={() => setShowProblemDetailModal(false)}
-          onShowQuoteModal={(problem) => { setSelectedProblemForQuote(problem); setShowQuoteModal(true); }} // This will be handled by the ProblemDetailPage's internal logic for quotes
-        />
+          ))}
+        </div>
       )}
-      {/* If QuoteModal is needed here (e.g., if a provider submits a quote from *this* page) */}
-      {showQuoteModal && (
-        <QuoteModal
-          isOpen={showQuoteModal}
-          onClose={() => setShowQuoteModal(false)}
-          problem={selectedProblemForQuote}
-          onSubmitQuote={() => { /* This function will likely be passed from a parent context/page */ }}
-        />
+      {isModalOpen && (
+        <QuoteModal isOpen={isModalOpen} onClose={handleCloseModal} quoteData={selectedRequest} />
       )}
-    </section>
+    </div>
   );
-}
+};
+
+export default MyRequestsPage;

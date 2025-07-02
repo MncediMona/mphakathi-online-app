@@ -1,55 +1,72 @@
 // app/my-quotes/page.js
-"use client";
+"use client"; // Ensure this is a client component
 
-import React, { useEffect } from 'react';
-import { AppContext } from '../../lib/appContext'; // Adjust path as needed
-import { FileTextIcon } from 'lucide-react'; // Example icon
+import React, { useState, useEffect } from 'react';
+import { useAppContext } from '../../lib/appContext'; // Correct path
 
-export default function MyQuotesPage() {
-  const { isAuthenticated, userProfile, myQuotes, fetchMyQuotes, isLoading } = React.useContext(AppContext);
+const MyQuotesPage = () => {
+  const { myQuotes, isLoading, error, userProfile, fetchMyQuotes } = useAppContext();
+  const [selectedQuote, setSelectedQuote] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Re-fetch on mount if not loading
   useEffect(() => {
-    if (isAuthenticated && userProfile?.id && userProfile?.role === 'provider' && !isLoading) {
+    if (userProfile?.role === 'provider' && !isLoading && !error) {
       fetchMyQuotes();
     }
-  }, [isAuthenticated, userProfile?.id, userProfile?.role, fetchMyQuotes, isLoading]);
+  }, [userProfile, isLoading, error, fetchMyQuotes]);
 
+  const handleViewQuote = (quote) => {
+    setSelectedQuote(quote);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedQuote(null);
+  };
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[calc(100vh-100px)]">
-        <div className="text-xl font-semibold text-gray-700">Loading your quotes...</div>
-      </div>
-    );
+    return <div className="text-center py-8">Loading quotes...</div>;
   }
 
-  if (!isAuthenticated || userProfile?.role !== 'provider') {
-    return (
-      <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-4">Access Denied</h2>
-        <p className="text-gray-700">You must be logged in as a provider to view your quotes.</p>
-      </section>
-    );
+  if (error) {
+    return <div className="text-center py-8 text-red-600">Error: {error}</div>;
+  }
+
+  if (!userProfile || userProfile.role !== 'provider') {
+    return <div className="text-center py-8 text-gray-600">You don&apos;t have access to view quotes as a provider.</div>; // Fixed here
   }
 
   return (
-    <section className="bg-white p-6 rounded-lg shadow-md mb-6">
-      <h2 className="text-2xl font-semibold text-gray-800 mb-4">My Submitted Quotes ({myQuotes.length})</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {myQuotes.length > 0 ? (
-          myQuotes.map(quote => (
-            <div key={quote.id} className="p-4 bg-gray-50 rounded-md border border-gray-200 shadow-sm">
-              <h4 className="text-lg font-medium text-gray-800 mb-1">Quote for: {quote.problem_title}</h4>
-              <p className="text-gray-600 text-sm mb-2">Amount: R{quote.amount?.toFixed(2)}</p>
-              <p className="text-gray-500 text-xs">Status: {quote.status}</p>
-              {/* Add buttons for withdraw/view details if needed */}
+    <div className="container mx-auto p-4">
+      <h1 className="text-3xl font-bold mb-6 text-gray-800">My Quotes</h1>
+      {myQuotes.length === 0 ? (
+        <p className="text-gray-600">You haven&apos;t provided any quotes yet.</p> // Fixed here
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {myQuotes.map((quote) => (
+            <div key={quote.id} className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
+              <h2 className="text-xl font-semibold mb-2 text-gray-700">Quote for Problem ID: {quote.problemId}</h2>
+              <p className="text-gray-600">Amount: R{quote.amount}</p>
+              <p className="text-gray-600">Status: <span className={`font-medium ${
+                quote.status === 'pending' ? 'text-yellow-600' :
+                quote.status === 'accepted' ? 'text-green-600' :
+                'text-red-600'
+              }`}>{quote.status}</span></p>
+              <button
+                onClick={() => handleViewQuote(quote)}
+                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition duration-200"
+              >
+                View Details
+              </button>
             </div>
-          ))
-        ) : (
-          <p className="text-gray-600">You haven't submitted any quotes yet.</p>
-        )}
-      </div>
-    </section>
+          ))}
+        </div>
+      )}
+      {/* Assuming QuoteModal is imported and defined */}
+      {/* <QuoteModal isOpen={isModalOpen} onClose={handleCloseModal} quoteData={selectedQuote} /> */}
+    </div>
   );
-}
+};
+
+export default MyQuotesPage;
