@@ -2,9 +2,9 @@
 'use client';
 
 import { ReactNode } from 'react';
-import { useStackAuthReady } from './StackAuthIsolation'; // Relative path
+import { useStackAuthReady } from './StackAuthIsolation';
 import { StackProvider } from '@stackframe/stack';
-import { getStackClientApp } from '../../lib/stack'; // Relative path
+import { getStackClientApp } from '../../lib/stack';
 
 interface SafeStackProviderProps {
   children: ReactNode;

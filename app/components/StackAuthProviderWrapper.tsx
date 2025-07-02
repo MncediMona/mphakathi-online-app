@@ -1,83 +1,46 @@
-// app/components/StackAuthIsolation.tsx
+// app/components/SafeStackProvider.tsx
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { StackClientApp } from '@stackframe/stack'; // Import StackClientApp here for type safety
+import { ReactNode } from 'react';
+import { useStackAuthReady } from './StackAuthIsolation';
+import { StackProvider } from '@stackframe/stack';
+import { getStackClientApp } from '../../lib/stack';
 
-// Create a context to track when Stack Auth is safe to use
-const   StackAuthReadyContext = createContext<{
-  isStackReady: boolean;
-  stackError: string | null;
-}>({
-  isStackReady: false,
-  stackError: null,
-});
-
-interface StackAuthIsolationProps {
+interface SafeStackProviderProps {
   children: ReactNode;
 }
 
-export function StackAuthIsolation({ children }: StackAuthIsolationProps) {
-  const [isStackReady, setIsStackReady] = useState(false);
-  const [stackError, setStackError] = useState<string | null>(null);
+export function SafeStackProvider({ children }: SafeStackProviderProps) {
+  const { isStackReady, stackError } = useStackAuthReady();
+  const stackClientApp = getStackClientApp();
 
-  useEffect(() => {
-    // Multiple checks to ensure environment is completely ready
-    const initializeStackAuth = async () => {
-      try {
-        // Check 1: Ensure we're in browser
-        if (typeof window === 'undefined') {
-          return;
-        }
+  if (stackError) {
+    console.warn('Stack Auth Error:', stackError);
+    return (
+      <div className="p-4 bg-red-50 border border-red-200 rounded">
+        <h2 className="text-red-800 font-semibold">Authentication Error</h2>
+        <p className="text-red-600 text-sm">{stackError}</p>
+        <p className="text-red-600 text-sm mt-2">
+          Please refresh the page or contact support if this persists.
+        </p>
+      </div>
+    );
+  }
 
-        // Check 2: Ensure localStorage is available and working
-        try {
-          localStorage.setItem('__stack_test__', 'test');
-          localStorage.removeItem('__stack_test__');
-        } catch (e) {
-          throw new Error('localStorage not available');
-        }
-
-        // Check 3: Ensure document is ready
-        if (document.readyState !== 'complete') {
-          await new Promise<void>(resolve => { // Explicitly type resolve as void
-            if (document.readyState === 'complete') {
-              resolve();
-            } else {
-              window.addEventListener('load', () => resolve(), { once: true });
-            }
-          });
-        }
-
-        // Check 4: Additional delay to ensure hydration is complete
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Check 5: Verify Stack Auth module can be imported without errors
-        // const { StackClientApp } = await import('@stackframe/stack'); // No need to re-import here, already imported at top
-
-        // Check 6: Try to create a minimal Stack instance to test initialization
-        // This part needs to be careful not to create a new instance every time,
-        // but rather verify if the environment allows for it.
-        // We will rely on getStackClientApp from lib/stack.ts for the actual instance.
-
-        // If we get here, the environment is likely ready for Stack Auth
-        setIsStackReady(true);
-      } catch (error) {
-        console.error('Stack Auth initialization failed:', error);
-        setStackError(error instanceof Error ? error.message : 'Unknown error');
-      }
-    };
-
-    initializeStackAuth();
-  }, []);
+  if (!isStackReady || !stackClientApp) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-2 text-gray-600">Initializing authentication...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <StackAuthReadyContext.Provider value={{ isStackReady, stackError }}>
+    <StackProvider app={stackClientApp}>
       {children}
-    </StackAuthReadyContext.Provider>
+    </StackProvider>
   );
-}
-
-export function useStackAuthReady() {
-  return useContext(StackAuthReadyContext);
 }

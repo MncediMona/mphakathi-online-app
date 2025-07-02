@@ -32,4 +32,3 @@ const QuoteModal = ({ isOpen, onClose, quoteData }) => {
 };
 
 export default QuoteModal;
-  

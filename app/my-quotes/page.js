@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../../lib/appContext'; // Correct path
+import QuoteModal from '../components/QuoteModal'; // ADDED THIS IMPORT STATEMENT
 
 const MyQuotesPage = () => {
   const { myQuotes, isLoading, error, userProfile, fetchMyQuotes } = useAppContext();
@@ -63,8 +64,9 @@ const MyQuotesPage = () => {
           ))}
         </div>
       )}
-      {/* Assuming QuoteModal is imported and defined */}
-      {/* <QuoteModal isOpen={isModalOpen} onClose={handleCloseModal} quoteData={selectedQuote} /> */}
+      {isModalOpen && (
+        <QuoteModal isOpen={isModalOpen} onClose={handleCloseModal} quoteData={selectedQuote} />
+      )}
     </div>
   );
 };

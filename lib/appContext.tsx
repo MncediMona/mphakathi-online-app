@@ -7,10 +7,10 @@ import { useStackAuthReady } from '../app/components/StackAuthIsolation';
 
 interface AppContextType {
   isAuthenticated: boolean;
-  user: any;
+  user: any; // Stackframe's user object type
   isLoading: boolean;
   error: string | null;
-  userProfile: any;
+  userProfile: any; // Your custom user profile
   login: () => void;
   logout: () => void;
   branding: any;
@@ -30,8 +30,17 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8
 export function AppProvider({ children }: { children: ReactNode }) {
   const { isStackReady, stackError } = useStackAuthReady();
 
-  const { isAuthenticated, user: stackAuthUser, isLoading: isStackAuthLoading } = useUser();
-  const stackApp = useStackApp();
+  // Get the full return object from useUser
+  const userHookResult = useUser();
+  const stackApp = useStackApp(); // Call useStackApp unconditionally
+
+  // Safely access properties from userHookResult
+  // Check if userHookResult itself is null/undefined before accessing properties
+  const stackAuthUser = userHookResult && 'user' in userHookResult ? userHookResult.user : null;
+  const isStackAuthLoading = userHookResult && 'isLoading' in userHookResult ? userHookResult.isLoading : true;
+
+  // Derive isAuthenticated from stackAuthUser
+  const isAuthenticated = !!stackAuthUser; // True if user object exists, false otherwise
 
   const [branding, setBranding] = useState<any>(null);
   const [pricingPlans, setPricingPlans] = useState<any[]>([]);
@@ -97,7 +106,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const idToken = await stackAuthUser.getIdToken();
+      const idToken = stackAuthUser ? await stackAuthUser.getIdToken() : null;
+      if (!idToken) {
+        console.warn("No ID token available for user profile fetch.");
+        setUserProfile(null);
+        return;
+      }
+
       const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-or-create-user-profile`, {
         method: 'POST',
         headers: {
@@ -125,7 +140,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const idToken = await stackAuthUser.getIdToken();
+      const idToken = stackAuthUser ? await stackAuthUser.getIdToken() : null;
+      if (!idToken) {
+        console.warn("No ID token available for my requests fetch.");
+        setMyRequests([]);
+        return;
+      }
       const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-my-requests?userId=${userProfile.id}`, {
         headers: {
           'Authorization': `Bearer ${idToken}`
@@ -146,7 +166,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const idToken = await stackAuthUser.getIdToken();
+      const idToken = stackAuthUser ? await stackAuthUser.getIdToken() : null;
+      if (!idToken) {
+        console.warn("No ID token available for my quotes fetch.");
+        setMyQuotes([]);
+        return;
+      }
       const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-my-quotes?providerId=${userProfile.id}`, {
         headers: {
           'Authorization': `Bearer ${idToken}`

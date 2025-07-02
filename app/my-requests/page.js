@@ -1,7 +1,7 @@
 // app/my-requests/page.js
-"use client"; // Ensure this is a client component
+"use client";
 
-import React, { useState, useEffect } from 'react'; // CORRECTED SYNTAX HERE
+import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../../lib/appContext'; // Correct path
 import QuoteModal from '../components/QuoteModal'; // Import QuoteModal
 
