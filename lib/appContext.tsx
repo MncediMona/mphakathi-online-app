@@ -3,9 +3,9 @@
 
 import React, { createContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { useUser, useStackApp } from '@stackframe/stack';
-import { useStackAuthReady } from '../app/components/StackAuthIsolation'; // Import the new hook
+import { useStackAuthReady } from '../app/components/StackAuthIsolation'; // Correct path: '../app/components/StackAuthIsolation'
 
-export const AppContext = createContext<any>(null); // Use 'any' for now, or define a more precise type if available
+export const AppContext = createContext<any>(null);
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8888';
 
@@ -13,12 +13,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const { isStackReady, stackError } = useStackAuthReady();
 
   let isAuthenticated = false;
-  let stackAuthUser: any = null; // Use any for stackAuthUser for now
+  let stackAuthUser: any = null;
   let isStackAuthLoading = true;
   let stackAppLogin = () => console.warn("Stack Auth login not available (context not ready).");
   let stackAppLogout = () => console.warn("Stack Auth logout not available (context not ready).");
 
-  // Only attempt to use Stack Auth hooks if Stack Auth is reported as ready
   if (isStackReady && !stackError) {
     try {
       const { isAuthenticated: auth, user: sUser, isLoading: sLoading } = useUser();
@@ -31,10 +30,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       stackAppLogout = stackApp.logout;
     } catch (error) {
       console.warn("Error accessing Stack Auth context in AppProvider (might be a transient issue):", error);
-      // Fallback to default values if an error occurs while accessing context
     }
   }
-
 
   const [branding, setBranding] = useState<any>(null);
   const [pricingPlans, setPricingPlans] = useState<any[]>([]);
@@ -44,7 +41,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [myRequests, setMyRequests] = useState<any[]>([]);
   const [myQuotes, setMyQuotes] = useState<any[]>([]);
 
-  // Data fetching functions
   const fetchBranding = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/.netlify/functions/get-branding`);
@@ -149,7 +145,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [isAuthenticated, userProfile?.id, userProfile?.role, stackAuthUser]);
 
 
-  // Effects for data loading
   useEffect(() => {
     const loadAllPublicData = async () => {
       setAppDataLoading(true);
@@ -160,8 +155,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [fetchBranding, fetchPlans, fetchPublicProblems]);
 
   useEffect(() => {
-    // Only fetch user profile if isAuthenticated is true AND Stack Auth context is ready
-    if (isAuthenticated && isStackReady) { // Rely on isStackReady from StackAuthIsolation
+    if (isAuthenticated && isStackReady) {
       fetchOrCreateUserProfile();
     } else {
       setUserProfile(null);
@@ -171,7 +165,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [isAuthenticated, fetchOrCreateUserProfile, isStackReady]);
 
   useEffect(() => {
-    if (userProfile?.id && isAuthenticated && isStackReady) { // Rely on isStackReady
+    if (userProfile?.id && isAuthenticated && isStackReady) {
       fetchMyRequests();
       fetchMyQuotes();
     }
@@ -190,7 +184,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     fetchMyQuotes,
     isAuthenticated,
     user: stackAuthUser,
-    isLoading: isStackAuthLoading || appDataLoading || !isStackReady, // Overall loading includes StackAuthReady
+    isLoading: isStackAuthLoading || appDataLoading || !isStackReady,
     login: stackAppLogin,
     logout: stackAppLogout,
   };

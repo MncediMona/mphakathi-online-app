@@ -8,16 +8,15 @@ import {
     HomeIcon, UserIcon, FileTextIcon,
     LogOutIcon, MenuIcon, ShieldCheckIcon, SettingsIcon, DollarSignIcon
 } from 'lucide-react';
-import { AppContext } from '../../lib/appContext'; // Now appContext.tsx
-import { useStackAuthReady } from './StackAuthIsolation'; // Import the new hook
+import { AppContext } from '../../lib/appContext';
+import { useStackAuthReady } from './StackAuthIsolation'; // Correct path: './StackAuthIsolation'
 
 export default function AuthNav() {
     const { isAuthenticated, userProfile, login, logout, isLoading: appLoading } = React.useContext(AppContext);
-    const { isStackReady, stackError } = useStackAuthReady(); // Get Stack Auth readiness
+    const { isStackReady, stackError } = useStackAuthReady();
     const pathname = usePathname();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-    // Show loading if app data is loading OR Stack Auth is not ready
     if (appLoading || !isStackReady) {
         return (
             <>
@@ -31,7 +30,6 @@ export default function AuthNav() {
         );
     }
 
-    // If there's a Stack Auth error, display a simplified nav or error message
     if (stackError) {
         return (
             <div className="hidden md:flex items-center space-x-6 text-red-600">
@@ -68,7 +66,7 @@ export default function AuthNav() {
                     </Link>
                 )}
                 {isAuthenticated ? (
-                    <button onClick={logout} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center">
+                    <button onClick={login} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center">
                         <LogOutIcon size={20} className="mr-1" /> Logout
                     </button>
                 ) : (
@@ -85,7 +83,6 @@ export default function AuthNav() {
                 </button>
             </div>
 
-            {/* Mobile Menu Content (can be implemented later or here) */}
             {isMobileMenuOpen && (
                 <div className="absolute top-16 left-0 right-0 bg-white shadow-lg p-4 md:hidden z-30">
                     <Link href="/" className="block py-2 text-gray-700 hover:text-blue-600" onClick={() => setIsMobileMenuOpen(false)}>Dashboard</Link>
