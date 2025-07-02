@@ -3,7 +3,7 @@
 
 import React, { createContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { useUser, useStackApp } from '@stackframe/stack';
-import { useStackAuthReady } from '../app/components/StackAuthIsolation'; // Correct path: '../app/components/StackAuthIsolation'
+import { useStackAuthReady } from '@/app/components/StackAuthIsolation'; // Changed to absolute import
 
 export const AppContext = createContext<any>(null);
 

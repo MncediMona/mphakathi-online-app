@@ -8,8 +8,8 @@ import {
     HomeIcon, UserIcon, FileTextIcon,
     LogOutIcon, MenuIcon, ShieldCheckIcon, SettingsIcon, DollarSignIcon
 } from 'lucide-react';
-import { AppContext } from '../../lib/appContext';
-import { useStackAuthReady } from './StackAuthIsolation'; // Correct path: './StackAuthIsolation'
+import { AppContext } from '@/lib/appContext'; // Changed to absolute import
+import { useStackAuthReady } from '@/app/components/StackAuthIsolation'; // Changed to absolute import
 
 export default function AuthNav() {
     const { isAuthenticated, userProfile, login, logout, isLoading: appLoading } = React.useContext(AppContext);
@@ -66,7 +66,7 @@ export default function AuthNav() {
                     </Link>
                 )}
                 {isAuthenticated ? (
-                    <button onClick={login} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center">
+                    <button onClick={logout} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center">
                         <LogOutIcon size={20} className="mr-1" /> Logout
                     </button>
                 ) : (
